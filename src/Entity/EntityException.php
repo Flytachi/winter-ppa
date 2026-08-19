@@ -12,6 +12,8 @@ use RuntimeException;
 /**
  * Thrown when a required entity is not found or violates a domain rule.
  * Logged at WARNING level (expected, caller-caused).
+ *
+ * @link https://winterframe.net/docs/repository Repositories: errors
  */
 class EntityException extends RuntimeException implements ExceptionLogLevel
 {

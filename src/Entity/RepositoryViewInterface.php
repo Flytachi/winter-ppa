@@ -30,6 +30,8 @@ use Flytachi\Winter\Ppa\Stereotype\Repository;
  * `TOverride` class declared via a method-level `@template`.
  *
  * @template TEntity of object
+ *
+ * @link https://winterframe.net/docs/repository Repositories: reading
  */
 interface RepositoryViewInterface extends RepositoryInterface
 {

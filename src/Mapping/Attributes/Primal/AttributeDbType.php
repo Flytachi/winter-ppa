@@ -6,6 +6,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Primal;
 
 use Flytachi\Winter\Ppa\Mapping\Attributes\AttributeDb;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: column types
+ */
 interface AttributeDbType extends AttributeDb
 {
     public function supports(array $phpTypes): bool;

@@ -7,6 +7,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Additive;
 use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: nullability and defaults
+ */
 final readonly class NullableIs implements AttributeDbAdditive
 {
     public function __construct(

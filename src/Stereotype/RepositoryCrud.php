@@ -34,6 +34,8 @@ use Flytachi\Winter\Ppa\Repository\RepositoryCrudTrait;
  * @extends RepositoryCore<TEntity>
  * @see Repository      For full CRUD + View access
  * @see RepositoryView  For read-only access
+ *
+ * @link https://winterframe.net/docs/repository Repositories: write-only stereotype
  */
 abstract class RepositoryCrud extends RepositoryCore implements RepositoryCrudInterface
 {

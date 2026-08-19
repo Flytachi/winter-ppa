@@ -24,6 +24,8 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\AttributeDbConfig;
  * #[Extension('postgis', version: '3.4', schema: 'gis')]
  * final class MainDbConfig extends DbConfig { ... }
  * ```
+ *
+ * @link https://winterframe.net/docs/entities Entities: table configuration
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final readonly class Extension implements AttributeDbConfig

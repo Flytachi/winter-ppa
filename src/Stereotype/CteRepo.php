@@ -31,6 +31,8 @@ use stdClass;
  * @implements RepositoryViewInterface<stdClass>
  * @use RepositoryViewTrait<stdClass>
  * @see RepositoryView For abstract repository classes with a fixed table.
+ *
+ * @link https://winterframe.net/docs/repository Repositories: CTE-only stereotype
  */
 final class CteRepo extends RepositoryCore implements RepositoryViewInterface
 {

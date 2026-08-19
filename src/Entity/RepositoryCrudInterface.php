@@ -14,6 +14,8 @@ use Flytachi\Winter\Ppa\Repository\RepositoryException;
  * capabilities. Implemented by {@see \Flytachi\Winter\Ppa\Repository\RepositoryCrudTrait}
  * and exposed via {@see \Flytachi\Winter\Ppa\Stereotype\RepositoryCrud} and
  * {@see \Flytachi\Winter\Ppa\Stereotype\Repository}.
+ *
+ * @link https://winterframe.net/docs/repository Repositories: writing
  */
 interface RepositoryCrudInterface extends RepositoryInterface
 {

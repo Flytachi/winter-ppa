@@ -18,6 +18,8 @@ use Psr\Log\LoggerInterface;
  * config lets `close()` deterministically drop the socket and `validate()` reuse the
  * driver's own `SELECT 1` probe. Each {@see create()} builds a fresh config so every
  * pool slot gets an independent socket.
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool
  */
 final readonly class CdoConnectionFactory implements ConnectionFactory
 {

@@ -33,6 +33,8 @@ use RuntimeException;
  * An application with no datasource therefore has no timer and leaves no directory.
  *
  * Set `PPA_POOL_TELEMETRY` to the publish interval in seconds, or `0` to disable.
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool: watching it
  */
 final class PoolTelemetry
 {

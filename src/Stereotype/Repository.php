@@ -32,6 +32,8 @@ use Flytachi\Winter\Ppa\Repository\RepositoryViewTrait;
  * @use RepositoryViewTrait<TEntity>
  * @see RepositoryView For read-only access.
  * @see RepositoryCrud For write-only access.
+ *
+ * @link https://winterframe.net/docs/repository Repositories
  */
 abstract class Repository extends RepositoryCore implements RepositoryCrudInterface, RepositoryViewInterface
 {

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Mapping\Constants;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: foreign keys
+ */
 enum FKAction: string
 {
     case RESTRICT = 'RESTRICT';

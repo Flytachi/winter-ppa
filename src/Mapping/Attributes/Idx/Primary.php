@@ -9,6 +9,9 @@ use Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod;
 use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: indexes
+ */
 final class Primary implements AttributeDbIdx
 {
     private array $columns = [];

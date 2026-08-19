@@ -8,6 +8,8 @@ namespace Flytachi\Winter\Ppa\Mapping\Constants;
  * Migration ordering priority for {@see \Flytachi\Winter\Ppa\Mapping\Attributes\Config\Migratable}.
  *
  * Lower value = earlier in the migration order. Sort ascending.
+ *
+ * @link https://winterframe.net/docs/migrations Migrations: order of application
  */
 enum MigratablePriority: int
 {

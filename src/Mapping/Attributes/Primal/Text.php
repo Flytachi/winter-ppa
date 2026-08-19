@@ -7,6 +7,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Primal;
 use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: column types
+ */
 final readonly class Text implements AttributeDbType
 {
     public function supports(array $phpTypes): bool

@@ -12,6 +12,8 @@ use RuntimeException;
 /**
  * Thrown when a repository operation fails at the infrastructure level.
  * Logged at ALERT level.
+ *
+ * @link https://winterframe.net/docs/repository Repositories: errors
  */
 class RepositoryException extends RuntimeException implements ExceptionLogLevel
 {

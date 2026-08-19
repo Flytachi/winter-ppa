@@ -21,6 +21,8 @@ use Throwable;
  * The classification reads the driver's own verdict — SQLSTATE and the driver error
  * code from `PDOException::$errorInfo` — walking the `previous` chain, because CDO
  * wraps the original `PDOException` inside a `CDOException`.
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool: what happens on a failure
  */
 final class ConnectionLoss
 {

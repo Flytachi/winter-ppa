@@ -8,6 +8,9 @@ use Attribute;
 use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: column types
+ */
 final readonly class Char implements AttributeDbType
 {
     /**

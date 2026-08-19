@@ -28,6 +28,8 @@ namespace Flytachi\Winter\Ppa\Entity;
  * }
  * // Produces: SELECT u.id, CONCAT(first_name, ' ', last_name) AS fullName FROM users u
  * ```
+ *
+ * @link https://winterframe.net/docs/entities Entities
  */
 interface EntityInterface
 {

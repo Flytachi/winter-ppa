@@ -8,6 +8,9 @@ use Attribute;
 use Flytachi\Winter\Ppa\Mapping\Constants\FKAction;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: constraints
+ */
 final readonly class ForeignKey implements AttributeDbConstraintForeign
 {
     public function __construct(

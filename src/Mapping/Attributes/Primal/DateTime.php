@@ -7,6 +7,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Primal;
 use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: column types
+ */
 readonly class DateTime implements AttributeDbType
 {
     final public function supports(array $phpTypes): bool

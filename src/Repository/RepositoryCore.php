@@ -60,6 +60,8 @@ use ValueError;
  * @template TEntity of object
  * @see RepositoryCrudTrait  for INSERT / UPDATE / DELETE / UPSERT operations
  * @see RepositoryViewTrait  for SELECT / find / count / exists operations
+ *
+ * @link https://winterframe.net/docs/repository Repositories: assembling a query
  */
 abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingInterface
 {
@@ -104,6 +106,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param string|null $as Optional table alias — calls {@see as()} before returning
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#instance Getting an instance
      */
     public static function instance(?string $as = null): static
     {
@@ -242,6 +246,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string[] $ignoreParts SQL part keys to skip during assembly
      *                              (e.g. `['order', 'limit', 'offset', 'for']`)
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#buildsql Inspecting the query
      */
     public function buildSql(array $ignoreParts = []): string
     {
@@ -285,6 +291,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|null $param Part key (e.g. `'where'`, `'order'`, `'binds'`), or null for full SQL
      * @return mixed SQL part value, or full SQL string
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#getsql Inspecting one part
      */
     final public function getSql(?string $param = null): mixed
     {
@@ -301,6 +309,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * Used internally when composing JOIN subqueries to decide whether
      * a sibling repository needs to be rendered as a subquery.
+     *
+     * @link https://winterframe.net/docs/repository#sqlpartscount-cleancache Resetting the query
      */
     final public function sqlPartsCount(): int
     {
@@ -317,6 +327,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param string|null $param Part key to remove (e.g. `'where'`, `'order'`), or null to reset all
      * @return void
+     *
+     * @link https://winterframe.net/docs/repository#sqlpartscount-cleancache Resetting the query
      */
     final public function cleanCache(?string $param = null): void
     {
@@ -350,6 +362,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param RepositoryInterface $repository
      * @param string|null $modifier e.g. 'MATERIALIZED', 'NOT MATERIALIZED'
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#with-withrecursive CTEs
      */
     final public function with(string $name, RepositoryInterface $repository, ?string $modifier = null): static
     {
@@ -371,6 +385,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string $name
      * @param RepositoryInterface $repository
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#with-withrecursive Recursive CTEs
      */
     final public function withRecursive(string $name, RepositoryInterface $repository): static
     {
@@ -385,6 +401,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $option
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#select Choosing columns
      */
     final public function select(string $option): static
     {
@@ -435,6 +453,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string|RepositoryInterface $repository
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#from A subquery as the source
      */
     final public function from(string|RepositoryInterface $repository): static
     {
@@ -461,6 +481,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $alias
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#as Setting the alias
      */
     final public function as(string $alias): static
     {
@@ -498,6 +520,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string|RepositoryInterface $repository
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#join-joininner-joinleft-joinright-joincross Joins
      */
     final public function joinCross(string|RepositoryInterface $repository): static
     {
@@ -522,6 +546,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|RepositoryInterface $repository
      * @param string|Qb $on
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#join-joininner-joinleft-joinright-joincross Joins
      */
     final public function join(string|RepositoryInterface $repository, string|Qb $on): static
     {
@@ -538,6 +564,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|RepositoryInterface $repository
      * @param string|Qb $on
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#join-joininner-joinleft-joinright-joincross Joins
      */
     final public function joinInner(string|RepositoryInterface $repository, string|Qb $on): static
     {
@@ -554,6 +582,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|RepositoryInterface $repository
      * @param string|Qb $on
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#join-joininner-joinleft-joinright-joincross Joins
      */
     final public function joinLeft(string|RepositoryInterface $repository, string|Qb $on): static
     {
@@ -570,6 +600,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|RepositoryInterface $repository
      * @param string|Qb $on
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#join-joininner-joinleft-joinright-joincross Joins
      */
     final public function joinRight(string|RepositoryInterface $repository, string|Qb $on): static
     {
@@ -589,6 +621,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param null|Qb $qb
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#where-andwhere-orwhere-xorwhere Conditions
      */
     final public function where(?Qb $qb): static
     {
@@ -609,6 +643,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param Qb $qb Condition builder
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#where-andwhere-orwhere-xorwhere Conditions
      */
     final public function andWhere(Qb $qb): static
     {
@@ -622,6 +658,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param Qb $qb Condition builder
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#where-andwhere-orwhere-xorwhere Conditions
      */
     final public function orWhere(Qb $qb): static
     {
@@ -635,6 +673,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param Qb $qb Condition builder
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#where-andwhere-orwhere-xorwhere Conditions
      */
     final public function xorWhere(Qb $qb): static
     {
@@ -662,6 +702,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $context
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
      */
     final public function groupBy(string $context): static
     {
@@ -674,6 +716,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $context
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
      */
     final public function having(string $context): static
     {
@@ -690,6 +734,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param RepositoryInterface $repository
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#union-unionall Unions
      */
     final public function union(RepositoryInterface $repository): static
     {
@@ -699,6 +745,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param RepositoryInterface $repository
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#union-unionall Unions
      */
     final public function unionAll(RepositoryInterface $repository): static
     {
@@ -726,6 +774,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $context
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
      */
     final public function orderBy(string $context): static
     {
@@ -739,6 +789,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param int $limit
      * @param int $offset
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#limit Limit and offset
      */
     final public function limit(int $limit, int $offset = 0): static
     {
@@ -759,6 +811,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     /**
      * @param string $context
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#forby Row locking
      */
     final public function forBy(string $context): static
     {

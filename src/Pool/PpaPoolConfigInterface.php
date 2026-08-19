@@ -21,6 +21,8 @@ namespace Flytachi\Winter\Ppa\Pool;
  *     public function setUp(): void { ... }
  * }
  * ```
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool: sizing
  */
 interface PpaPoolConfigInterface
 {

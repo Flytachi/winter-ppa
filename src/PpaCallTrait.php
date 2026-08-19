@@ -35,6 +35,8 @@ use Flytachi\Winter\Ppa\Stereotype\CteRepo;
  * ```
  *
  * @package Flytachi\Winter\Ppa
+ *
+ * @link https://winterframe.net/docs/db-configuration Database configuration
  */
 trait PpaCallTrait
 {

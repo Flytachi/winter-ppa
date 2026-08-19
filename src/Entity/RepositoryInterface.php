@@ -20,6 +20,8 @@ use ValueError;
  * Extended by {@see RepositoryCrudInterface} (write operations) and
  * {@see RepositoryViewInterface} (read operations). Implemented by
  * {@see \Flytachi\Winter\Ppa\Repository\RepositoryCore}.
+ *
+ * @link https://winterframe.net/docs/repository Repositories
  */
 interface RepositoryInterface
 {

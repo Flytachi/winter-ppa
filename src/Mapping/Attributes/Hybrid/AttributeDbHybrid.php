@@ -10,6 +10,9 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\AttributeDbIdx;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\AttributeDbType;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Sub\AttributeDbSubType;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: primary keys
+ */
 interface AttributeDbHybrid extends AttributeDb
 {
     /**

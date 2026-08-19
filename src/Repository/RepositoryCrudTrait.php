@@ -25,6 +25,8 @@ use Flytachi\Winter\Ppa\Pool\PpaConnectionPool;
  * ```
  *
  * @mixin RepositoryCrudInterface
+ *
+ * @link https://winterframe.net/docs/repository Repositories: writing
  */
 trait RepositoryCrudTrait
 {
@@ -35,6 +37,8 @@ trait RepositoryCrudTrait
      * @param object|array $entity Entity object or associative column-value array
      * @return mixed Last insert ID or driver-specific return value
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#insert Inserting a row
      */
     public function insert(object|array $entity): mixed
     {
@@ -73,6 +77,8 @@ trait RepositoryCrudTrait
      * @param iterable|object ...$entities Entities, streams of entities, or both.
      * @return void
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#insertbatch Inserting in batches
      */
     public function insertBatch(iterable|object ...$entities): void
     {
@@ -92,6 +98,8 @@ trait RepositoryCrudTrait
      * @param Qb           $qb      WHERE condition
      * @return int|string Number of affected rows or driver-specific return value
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#update Updating rows
      */
     public function update(object|array $entity, Qb $qb): int|string
     {
@@ -110,6 +118,8 @@ trait RepositoryCrudTrait
      * @param Qb $qb WHERE condition
      * @return int|string Number of affected rows or driver-specific return value
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#delete Deleting rows
      */
     public function delete(Qb $qb): int|string
     {
@@ -124,12 +134,22 @@ trait RepositoryCrudTrait
     /**
      * Inserts an entity, updating specified columns on conflict.
      *
+     * `$updateColumns` maps **column => expression** (`':new'` for the incoming value,
+     * `':current'` for the stored one). A plain list of column names is refused by CDO
+     * with a message showing the corrected call.
+     *
+     * `null` and `[]` mean the same thing and it is not "update everything": the conflict
+     * is **ignored**, the stored row is left as it was. Updating requires naming the
+     * columns.
+     *
      * @see CDO::upsert()
      * @param object|array  $entity          Entity to insert or update
      * @param array         $conflictColumns Columns that define the conflict target
-     * @param array|null    $updateColumns   Columns to update on conflict; null updates all non-conflict columns
+     * @param array|null    $updateColumns   Column => expression map; null or [] ignores the conflict
      * @return mixed Last insert ID or driver-specific return value
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#upsert Insert or update
      */
     public function upsert(
         object|array $entity,
@@ -162,6 +182,8 @@ trait RepositoryCrudTrait
      * @param array|null $updateColumns Column => expression map; null or [] ignores conflicts.
      * @return void
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#upsertbatch Insert or update, in batches
      */
     public function upsertBatch(
         iterable $entities,

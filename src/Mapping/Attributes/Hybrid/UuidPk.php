@@ -11,6 +11,9 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Primary;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Uuid;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: primary keys
+ */
 final readonly class UuidPk implements AttributeDbHybrid
 {
     public function getInstances(string $dialect = 'mysql'): array

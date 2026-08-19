@@ -34,6 +34,8 @@ use Throwable;
  *
  * @template TEntity of object
  * @mixin RepositoryViewInterface<TEntity>
+ *
+ * @link https://winterframe.net/docs/repository Repositories: reading
  */
 trait RepositoryViewTrait
 {
@@ -47,6 +49,8 @@ trait RepositoryViewTrait
      *                                                      `null` uses the repository default.
      * @return ($entityClassName is null ? list<TEntity> : list<TOverride>) Array of hydrated objects.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#rawfetch Running raw SQL
      */
     final public function rawFetch(string $sql, array $binds = [], ?string $entityClassName = null): array
     {
@@ -75,6 +79,8 @@ trait RepositoryViewTrait
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
      * @return ($entityClassName is null ? TEntity|null : TOverride|null) First matching entity, or `null`.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#find Reading the first row
      */
     final public function find(?string $entityClassName = null): ?object
     {
@@ -100,6 +106,8 @@ trait RepositoryViewTrait
      * @param int $column Zero-based column index (default 0)
      * @return mixed Column value, or false if no row found
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findcolumn Reading one value
      */
     final public function findColumn(int $column = 0): mixed
     {
@@ -125,6 +133,8 @@ trait RepositoryViewTrait
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
      * @return ($entityClassName is null ? list<TEntity> : list<TOverride>) Array of hydrated objects.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findall Reading every row
      */
     final public function findAll(?string $entityClassName = null): array
     {
@@ -149,6 +159,8 @@ trait RepositoryViewTrait
      *
      * @return int Row count
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#count Counting rows
      */
     final public function count(): int
     {
@@ -174,6 +186,8 @@ trait RepositoryViewTrait
      *
      * @return bool
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#exists Checking existence
      */
     final public function exists(): bool
     {
@@ -202,6 +216,8 @@ trait RepositoryViewTrait
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
      * @return ($entityClassName is null ? TEntity|null : TOverride|null) Matching entity, or `null`.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
      */
     final public function findById(int|string $id, ?string $entityClassName = null): ?object
     {
@@ -217,6 +233,8 @@ trait RepositoryViewTrait
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
      * @return ($entityClassName is null ? TEntity|null : TOverride|null) Matching entity, or `null`.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
      */
     final public function findBy(Qb $qb, ?string $entityClassName = null): ?object
     {
@@ -231,6 +249,8 @@ trait RepositoryViewTrait
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
      * @return ($entityClassName is null ? list<TEntity> : list<TOverride>) Matching entities.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
      */
     final public function findAllBy(?Qb $qb = null, ?string $entityClassName = null): array
     {
@@ -248,6 +268,8 @@ trait RepositoryViewTrait
      * @return ($entityClassName is null ? TEntity : TOverride) Matching entity (never `null`).
      * @throws EntityException When the record is not found.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findbyidorthrow-findbyorthrow Reading, or failing loudly
      */
     final public function findByIdOrThrow(
         int|string $id,
@@ -273,6 +295,8 @@ trait RepositoryViewTrait
      * @return ($entityClassName is null ? TEntity : TOverride) Matching entity (never `null`).
      * @throws EntityException When no record matches the condition.
      * @throws RepositoryException
+     *
+     * @link https://winterframe.net/docs/repository#findbyidorthrow-findbyorthrow Reading, or failing loudly
      */
     final public function findByOrThrow(
         Qb $qb,

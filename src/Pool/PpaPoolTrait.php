@@ -26,6 +26,8 @@ namespace Flytachi\Winter\Ppa\Pool;
  * @property float $keepaliveTime      Background probe of idle connections; 0 = off (default: 0.0). Swoole only.
  * @property float $idleTimeout        Close idle connections after N seconds; 0 = never (default: 0.0). Swoole only.
  * @property int   $minimumIdle        Warm connection floor; 0 = fully lazy (default: 0). Swoole only.
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool: sizing
  */
 trait PpaPoolTrait
 {

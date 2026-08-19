@@ -9,6 +9,9 @@ use Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod;
 use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
 
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::IS_REPEATABLE)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: indexes
+ */
 final class Unique implements AttributeDbIdx
 {
     public function __construct(

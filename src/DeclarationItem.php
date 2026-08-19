@@ -22,6 +22,8 @@ use ReflectionClass;
  *
  * On construction the item also scans the config class for
  * {@see ExtensionAttribute} attributes and exposes them via {@see getExtensions()}.
+ *
+ * @link https://winterframe.net/docs/migrations Migrations
  */
 final class DeclarationItem
 {

@@ -26,6 +26,8 @@ use Flytachi\Winter\Ppa\Mapping\Structure\Table;
  *     }
  * }
  * ```
+ *
+ * @link https://winterframe.net/docs/migrations Migrations
  */
 final class Declaration
 {

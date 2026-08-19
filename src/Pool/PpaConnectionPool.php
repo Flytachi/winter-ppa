@@ -53,6 +53,8 @@ use Throwable;
  * ## Works with every CDO driver
  * The pool operates on `CDO` objects produced by `DbConfigInterface::connection()`,
  * so it is driver-agnostic — pgsql, mysql, oci, sqlite — anything CDO supports.
+ *
+ * @link https://winterframe.net/docs/ppa-pooling Connection pool
  */
 final class PpaConnectionPool
 {

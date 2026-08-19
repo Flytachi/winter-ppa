@@ -20,6 +20,9 @@ use Flytachi\Winter\Ppa\Mapping\Structure\ForeignKey;
 use ReflectionAttribute;
 use ReflectionProperty;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: how columns are built
+ */
 final class ColumnMapping
 {
     /** @var Column[]  */

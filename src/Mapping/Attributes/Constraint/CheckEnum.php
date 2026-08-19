@@ -10,6 +10,9 @@ use Flytachi\Winter\Ppa\Mapping\Structure\CheckConstraint;
 use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: constraints
+ */
 final readonly class CheckEnum implements AttributeDbConstraintCheck
 {
     /**

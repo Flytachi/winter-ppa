@@ -7,6 +7,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Idx;
 use Flytachi\Winter\Ppa\Mapping\Attributes\AttributeDb;
 use Flytachi\Winter\Ppa\Mapping\Structure\Index;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: indexes
+ */
 interface AttributeDbIdx extends AttributeDb
 {
     public function columnPreparation(string $columnMain): void;

@@ -6,6 +6,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Constraint;
 
 use Flytachi\Winter\Ppa\Mapping\Structure\ForeignKey;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: constraints
+ */
 interface AttributeDbConstraintForeign extends AttributeDbConstraint
 {
     public function toObject(string $columnName, string $dialect = 'mysql'): ForeignKey;

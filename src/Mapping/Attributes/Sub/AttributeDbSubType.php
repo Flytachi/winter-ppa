@@ -6,6 +6,9 @@ namespace Flytachi\Winter\Ppa\Mapping\Attributes\Sub;
 
 use Flytachi\Winter\Ppa\Mapping\Attributes\AttributeDb;
 
+/**
+ * @link https://winterframe.net/docs/entities Entities: type modifiers
+ */
 interface AttributeDbSubType extends AttributeDb
 {
     public function supports(array &$phpTypes): bool;

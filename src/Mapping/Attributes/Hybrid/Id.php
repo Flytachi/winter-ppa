@@ -11,6 +11,9 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Integer;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Sub\AutoIncrement;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
+/**
+ * @link https://winterframe.net/docs/entities Entities: primary keys
+ */
 final readonly class Id implements AttributeDbHybrid
 {
     /**
