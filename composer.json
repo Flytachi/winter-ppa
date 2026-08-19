@@ -1,6 +1,6 @@
 {
     "name": "flytachi/winter-ppa",
-    "description": "",
+    "description": "PHP Persistence API — a pooled, coroutine-safe data layer for PHP: repositories, entity mapping and schema declarations over CDO.",
     "type": "library",
     "license": "MIT",
     "scripts": {
@@ -20,11 +20,17 @@
         }
     },
     "require": {
-        "php": ">=8.4"
+        "php": ">=8.4",
+        "flytachi/winter-cdo": "^4.0",
+        "flytachi/winter-cpool": "^1.0",
+        "flytachi/winter-base": "^3.0",
+        "flytachi/winter-di": "^2.0",
+        "psr/log": "^3.0"
     },
     "require-dev": {
         "phpunit/phpunit": "@stable",
-        "squizlabs/php_codesniffer": "@stable"
+        "squizlabs/php_codesniffer": "@stable",
+        "swoole/ide-helper": "^6.0"
     },
     "homepage": "https://winterframe.net",
     "support": {
@@ -32,11 +38,27 @@
         "source": "https://github.com/flytachi/winter-ppa",
         "docs": "https://winterframe.net/docs/ppa"
     },
-    "keywords": [],
+    "keywords": [
+        "php",
+        "database",
+        "orm",
+        "repository",
+        "migrations",
+        "connection-pool",
+        "coroutine",
+        "swoole",
+        "postgresql",
+        "mysql",
+        "winter"
+    ],
     "authors": [
         {
             "name": "Flytachi",
             "email": "jason.khan.x@gmail.com"
         }
-    ]
+    ],
+    "suggest": {
+        "ext-swoole": "Enables the coroutine connection pool; without it one self-maintaining connection per config is used.",
+        "ext-pdo": "Required by the CDO driver this layer works through."
+    }
 }
