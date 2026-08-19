@@ -25,12 +25,17 @@
         "flytachi/winter-cpool": "^1.0",
         "flytachi/winter-base": "^3.0",
         "flytachi/winter-di": "^2.0",
+        "flytachi/file-store": "^2.0",
         "psr/log": "^3.0"
     },
     "require-dev": {
         "phpunit/phpunit": "@stable",
         "squizlabs/php_codesniffer": "@stable",
         "swoole/ide-helper": "^6.0"
+    },
+    "suggest": {
+        "ext-swoole": "Enables the coroutine connection pool; without it one self-maintaining connection per config is used.",
+        "ext-pdo": "Required by the CDO driver this layer works through."
     },
     "homepage": "https://winterframe.net",
     "support": {
@@ -56,9 +61,5 @@
             "name": "Flytachi",
             "email": "jason.khan.x@gmail.com"
         }
-    ],
-    "suggest": {
-        "ext-swoole": "Enables the coroutine connection pool; without it one self-maintaining connection per config is used.",
-        "ext-pdo": "Required by the CDO driver this layer works through."
-    }
+    ]
 }

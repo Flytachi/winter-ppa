@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Flytachi\Winter\Ppa\Pool;
 
 use Flytachi\FileStore\FileStorage;
+use RuntimeException;
 
 /**
  * Publishes each worker's pool utilisation to the shared runnable store so the CLI
@@ -44,8 +45,11 @@ final class PoolTelemetry
     /** Swoole timer id of the publisher in this worker, or null when not running. */
     private static ?int $timerId = null;
 
-    /** Where records are written; the framework sets it at boot. */
-    private static ?string $storePath = null;
+    /** Builds the storage on first use; the framework installs it at boot. @var (callable(): FileStorage)|null */
+    private static $storeProvider = null;
+
+    /** The built storage, kept so it is built once. */
+    private static ?FileStorage $store = null;
 
     /** The worker this process publishes as, or null where telemetry does not apply. */
     private static ?int $workerId = null;
@@ -140,16 +144,25 @@ final class PoolTelemetry
      * parent's worker id and overwrite the parent's record with its own numbers.
      */
     /**
-     * Directory the per-worker records are written to, with a trailing separator.
+     * Installs how the storage of per-worker records is obtained.
      *
-     * The framework points this at its own runtime directory at boot. Left unset the
-     * system temporary directory is used, which is right for a standalone process and
-     * wrong for anything that expects the records to be found by something else — hence
-     * the injection rather than a guess.
+     * Telemetry is inert until this is called: workers publish nothing and
+     * {@see snapshot()} answers empty. That is deliberate — the records have to land
+     * where the reader is looking, and only the application knows where that is. The
+     * framework points it at its own runtime directory at boot.
+     *
+     * A provider rather than a storage, because building one creates its directory: an
+     * application that never touches a pool would otherwise leave an empty
+     * `runnable/ppa.pool/` behind, which reads to anyone looking as "this application
+     * uses PPA". Nothing is built until something is actually published.
+     *
+     * Keys are stored unhashed so {@see FileStorage::keys()} round-trips back into
+     * {@see FileStorage::read()}.
      */
-    public static function setStorePath(string $path): void
+    public static function setStoreProvider(?callable $provider): void
     {
-        self::$storePath = rtrim($path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        self::$storeProvider = $provider;
+        self::$store         = null;
     }
 
     public static function forget(): void
@@ -251,9 +264,22 @@ final class PoolTelemetry
         return 'worker.' . $workerId;
     }
 
-    /** Non-hashed keys so {@see FileStorage::keys()} round-trips back into `read()`. */
+    /**
+     * The storage, or a failure the callers already handle.
+     *
+     * @throws RuntimeException When no storage was installed — telemetry cannot invent a
+     *   location, and every caller of this already treats a throw as "no records".
+     */
     private static function store(): FileStorage
     {
-        return (self::$storePath ?? sys_get_temp_dir() . DIRECTORY_SEPARATOR) . self::STORE;
+        if (self::$store !== null) {
+            return self::$store;
+        }
+
+        $provider = self::$storeProvider ?? throw new RuntimeException(
+            'PoolTelemetry has no storage: call PoolTelemetry::setStoreProvider() at application boot.',
+        );
+
+        return self::$store = $provider();
     }
 }
