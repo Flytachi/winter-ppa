@@ -11,7 +11,7 @@ use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: constraints
+ * @link https://winterframe.net/docs/entities#checkenum Entities: the #[CheckEnum] attribute
  */
 final readonly class CheckEnum implements AttributeDbConstraintCheck
 {

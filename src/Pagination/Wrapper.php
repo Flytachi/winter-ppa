@@ -53,7 +53,7 @@ final class Wrapper
      *
      * @throws ValueError When `$limit < 1`.
      *
-     * @link https://winterframe.net/docs/pagination#wrapper Numbered pages
+     * @link https://winterframe.net/docs/pagination#wrapperpaginator Numbered pages
      */
     final public static function paginator(
         array|RepositoryViewInterface $repo,

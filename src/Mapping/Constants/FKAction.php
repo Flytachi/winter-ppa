@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Flytachi\Winter\Ppa\Mapping\Constants;
 
 /**
- * @link https://winterframe.net/docs/entities Entities: foreign keys
+ * @link https://winterframe.net/docs/entities#foreignkey Entities: foreign key actions
  */
 enum FKAction: string
 {

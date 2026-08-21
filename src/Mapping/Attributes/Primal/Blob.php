@@ -9,7 +9,7 @@ use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#blob Entities: the #[Blob] attribute
  */
 final readonly class Blob implements AttributeDbType
 {

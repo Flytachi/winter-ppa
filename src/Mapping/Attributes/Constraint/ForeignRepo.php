@@ -10,7 +10,7 @@ use Flytachi\Winter\Ppa\Mapping\RepositoryMappingInterface;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: constraints
+ * @link https://winterframe.net/docs/entities#foreignrepo Entities: the #[ForeignRepo] attribute
  */
 final readonly class ForeignRepo implements AttributeDbConstraintForeign
 {

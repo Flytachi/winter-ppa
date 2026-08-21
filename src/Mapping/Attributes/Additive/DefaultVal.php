@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: nullability and defaults
+ * @link https://winterframe.net/docs/entities#defaultval Entities: the #[DefaultVal] attribute
  */
 final readonly class DefaultVal implements AttributeDbAdditive
 {

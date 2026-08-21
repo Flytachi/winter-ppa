@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: type modifiers
+ * @link https://winterframe.net/docs/entities#autoincrement Entities: the #[AutoIncrement] attribute
  */
 final readonly class AutoIncrement implements AttributeDbSubType
 {

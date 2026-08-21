@@ -30,7 +30,7 @@ use Flytachi\Winter\Ppa\Mapping\Constants\MigratablePriority;
  * final class AnalyticsDbConfig extends DbConfig { ... }
  * ```
  *
- * @link https://winterframe.net/docs/entities Entities: table configuration
+ * @link https://winterframe.net/docs/db-configuration Database configuration: opting into migrations
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class Migratable implements AttributeDbConfig

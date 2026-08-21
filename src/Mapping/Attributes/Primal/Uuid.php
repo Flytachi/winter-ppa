@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#uuid Entities: the #[Uuid] attribute
  */
 final readonly class Uuid implements AttributeDbType
 {

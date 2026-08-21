@@ -211,6 +211,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
 
     /**
      * @return CDO
+     *
+     * @link https://winterframe.net/docs/repository#db The connection the repository works on
      */
     public function db(): CDO
     {
@@ -310,7 +312,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * Used internally when composing JOIN subqueries to decide whether
      * a sibling repository needs to be rendered as a subquery.
      *
-     * @link https://winterframe.net/docs/repository#sqlpartscount-cleancache Resetting the query
+     * @link https://winterframe.net/docs/repository#sqlpartscount Resetting the query
      */
     final public function sqlPartsCount(): int
     {
@@ -328,7 +330,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string|null $param Part key to remove (e.g. `'where'`, `'order'`), or null to reset all
      * @return void
      *
-     * @link https://winterframe.net/docs/repository#sqlpartscount-cleancache Resetting the query
+     * @link https://winterframe.net/docs/repository#cleancache Resetting the query
      */
     final public function cleanCache(?string $param = null): void
     {
@@ -703,7 +705,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string $context
      * @return static
      *
-     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
+     * @link https://winterframe.net/docs/repository#groupby Grouping and order
      */
     final public function groupBy(string $context): static
     {
@@ -717,7 +719,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string $context
      * @return static
      *
-     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
+     * @link https://winterframe.net/docs/repository#having Grouping and order
      */
     final public function having(string $context): static
     {
@@ -775,7 +777,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * @param string $context
      * @return static
      *
-     * @link https://winterframe.net/docs/repository#groupby-having-orderby Grouping and order
+     * @link https://winterframe.net/docs/repository#orderby Grouping and order
      */
     final public function orderBy(string $context): static
     {
@@ -835,6 +837,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      *
      * @param CDOBind[]|null $binds Array of {@see CDOBind} objects to merge, or null
      * @return static
+     *
+     * @link https://winterframe.net/docs/repository#binding Adding binds by hand
      */
     final public function binding(?array $binds): static
     {

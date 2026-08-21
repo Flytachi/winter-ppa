@@ -9,7 +9,7 @@ use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#binary Entities: the #[Binary] attribute
  */
 final readonly class Binary implements AttributeDbType
 {

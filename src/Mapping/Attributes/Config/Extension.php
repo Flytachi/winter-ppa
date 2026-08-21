@@ -25,7 +25,7 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\AttributeDbConfig;
  * final class MainDbConfig extends DbConfig { ... }
  * ```
  *
- * @link https://winterframe.net/docs/entities Entities: table configuration
+ * @link https://winterframe.net/docs/db-configuration Database configuration: extensions
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final readonly class Extension implements AttributeDbConfig

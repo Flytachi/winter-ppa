@@ -217,7 +217,7 @@ trait RepositoryViewTrait
      * @return ($entityClassName is null ? TEntity|null : TOverride|null) Matching entity, or `null`.
      * @throws RepositoryException
      *
-     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
+     * @link https://winterframe.net/docs/repository#findbyid Reading by key or condition
      */
     final public function findById(int|string $id, ?string $entityClassName = null): ?object
     {
@@ -234,7 +234,7 @@ trait RepositoryViewTrait
      * @return ($entityClassName is null ? TEntity|null : TOverride|null) Matching entity, or `null`.
      * @throws RepositoryException
      *
-     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
+     * @link https://winterframe.net/docs/repository#findby Reading by key or condition
      */
     final public function findBy(Qb $qb, ?string $entityClassName = null): ?object
     {
@@ -250,7 +250,7 @@ trait RepositoryViewTrait
      * @return ($entityClassName is null ? list<TEntity> : list<TOverride>) Matching entities.
      * @throws RepositoryException
      *
-     * @link https://winterframe.net/docs/repository#findbyid-findby-findallby Reading by key or condition
+     * @link https://winterframe.net/docs/repository#findallby Reading by key or condition
      */
     final public function findAllBy(?Qb $qb = null, ?string $entityClassName = null): array
     {
@@ -269,7 +269,7 @@ trait RepositoryViewTrait
      * @throws EntityException When the record is not found.
      * @throws RepositoryException
      *
-     * @link https://winterframe.net/docs/repository#findbyidorthrow-findbyorthrow Reading, or failing loudly
+     * @link https://winterframe.net/docs/repository#findbyidorthrow Reading, or failing loudly
      */
     final public function findByIdOrThrow(
         int|string $id,
@@ -296,7 +296,7 @@ trait RepositoryViewTrait
      * @throws EntityException When no record matches the condition.
      * @throws RepositoryException
      *
-     * @link https://winterframe.net/docs/repository#findbyidorthrow-findbyorthrow Reading, or failing loudly
+     * @link https://winterframe.net/docs/repository#findbyorthrow Reading, or failing loudly
      */
     final public function findByOrThrow(
         Qb $qb,

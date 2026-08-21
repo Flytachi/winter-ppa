@@ -22,7 +22,7 @@ use RuntimeException;
  * from the client and is no longer valid; refreshing the page (clearing
  * the cursor) is the typical recovery.
  *
- * @link https://winterframe.net/docs/pagination Pagination: errors
+ * @link https://winterframe.net/docs/pagination#invalidcursorexception Pagination: cursor errors
  */
 final class InvalidCursorException extends RuntimeException
 {

@@ -12,7 +12,7 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Uuid;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: primary keys
+ * @link https://winterframe.net/docs/entities#uuidpk Entities: the #[UuidPk] attribute
  */
 final readonly class UuidPk implements AttributeDbHybrid
 {

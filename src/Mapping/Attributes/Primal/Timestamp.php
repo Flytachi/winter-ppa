@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#timestamp Entities: the #[Timestamp] attribute
  */
 final readonly class Timestamp extends DateTime implements AttributeDbType
 {

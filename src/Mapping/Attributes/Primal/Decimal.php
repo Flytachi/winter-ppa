@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#decimal Entities: the #[Decimal] attribute
  */
 final readonly class Decimal extends FloatType implements AttributeDbType
 {

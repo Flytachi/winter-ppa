@@ -9,7 +9,7 @@ use Flytachi\Winter\Ppa\Mapping\Structure\CheckConstraint;
 
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_CLASS)]
 /**
- * @link https://winterframe.net/docs/entities Entities: constraints
+ * @link https://winterframe.net/docs/entities#check Entities: the #[Check] attribute
  */
 final readonly class Check implements AttributeDbConstraintCheck
 {

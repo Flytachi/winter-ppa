@@ -8,7 +8,7 @@ use Attribute;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: column types
+ * @link https://winterframe.net/docs/entities#varchar Entities: the #[Varchar] attribute
  */
 final readonly class Varchar implements AttributeDbType
 {

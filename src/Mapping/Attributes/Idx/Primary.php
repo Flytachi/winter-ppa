@@ -10,7 +10,7 @@ use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: indexes
+ * @link https://winterframe.net/docs/entities#primary Entities: the #[Primary] attribute
  */
 final class Primary implements AttributeDbIdx
 {

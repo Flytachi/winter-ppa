@@ -10,7 +10,7 @@ use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
 
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::IS_REPEATABLE)]
 /**
- * @link https://winterframe.net/docs/entities Entities: indexes
+ * @link https://winterframe.net/docs/entities#unique Entities: the #[Unique] attribute
  */
 final class Unique implements AttributeDbIdx
 {

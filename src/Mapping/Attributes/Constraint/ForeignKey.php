@@ -9,7 +9,7 @@ use Flytachi\Winter\Ppa\Mapping\Constants\FKAction;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 /**
- * @link https://winterframe.net/docs/entities Entities: constraints
+ * @link https://winterframe.net/docs/entities#foreignkey Entities: the #[ForeignKey] attribute
  */
 final readonly class ForeignKey implements AttributeDbConstraintForeign
 {
