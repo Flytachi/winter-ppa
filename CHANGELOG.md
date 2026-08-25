@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+**Per-coroutine repository state is keyed by the repository object, not by `spl_object_id()`.**
+Under Swoole, `RepositoryCore::state()` stored each repository's `sqlParts` and
+`entityClassName` in the coroutine context under `'__rp_' . spl_object_id($this)`. PHP hands
+that id back out the moment an object is freed, and repositories are overwhelmingly
+short-lived temporaries — `Repo::instance('c')` passed straight into `joinLeft()` is dropped
+as soon as the join string is built, while its state stayed behind in the context. The next
+repository to land on the recycled slot inherited it: a foreign alias, SELECT, WHERE, JOIN,
+LIMIT and entity class, with only `FROM` still coming from its own class. The state now lives
+in a `WeakMap` held in the coroutine context and keyed by the object itself, so identity is
+never recycled and each state is released as soon as its repository is collected — which also
+ends the slow growth of the context over the life of a request.
+
+Symptom this fixes, from a real application:
+
+```
+SELECT c.id, c.name, c.is_delete FROM dev2.conduct_warehouse_staffs c WHERE staff_id = :iqb0
+```
+
+— the right table, another repository's alias and columns. Affected the Swoole coroutine path
+only; the FPM path stores state on the object and was never involved. Public behaviour is
+unchanged: per-coroutine isolation, `cleanCache($part)` and the full `cleanCache()` reset all
+work as documented.
+
 ## [1.1.0] — Unreleased
 
 ### Added

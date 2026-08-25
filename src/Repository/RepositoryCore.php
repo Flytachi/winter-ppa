@@ -23,6 +23,7 @@ use stdClass;
 use Swoole\Coroutine;
 use Throwable;
 use ValueError;
+use WeakMap;
 
 /**
  * Abstract base class for all repository implementations.
@@ -75,6 +76,8 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     public static string $table = '';
     /** @var array $sqlParts sql parameters (FPM backing store; Swoole uses per-coroutine state) */
     protected array $sqlParts = [];
+    /** Coroutine-context key under which the per-coroutine {@see WeakMap} of states lives. */
+    private const string STATE_CONTEXT_KEY = '__rp_states';
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -156,26 +159,40 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * `$this->state()->sqlParts` is identical to `$this->sqlParts` — zero
      * overhead and identical semantics to the original code.
      *
-     * **Swoole coroutine**: returns a `stdClass` stored in the current
-     * coroutine's context keyed by this object's identity.  Each coroutine gets
-     * its own isolated copy of `sqlParts` and `entityClassName`, preventing
-     * cross-coroutine state corruption when the DI container reuses the same
-     * Repository singleton across concurrent requests.
+     * **Swoole coroutine**: returns a `stdClass` held in a {@see WeakMap} that lives in the
+     * current coroutine's context and is keyed by this repository object. Each coroutine
+     * gets its own isolated copy of `sqlParts` and `entityClassName`, preventing
+     * cross-coroutine state corruption when the DI container reuses the same Repository
+     * singleton across concurrent requests.
+     *
+     * The map must be keyed by the object, never by `spl_object_id()`: PHP recycles an
+     * object id the moment the object is freed, and repositories are overwhelmingly
+     * short-lived temporaries (`Repo::instance('c')` handed straight to `joinLeft()`).
+     * Keying by id let the next repository to land on that slot inherit the dead one's
+     * alias, SELECT, WHERE and entity class. Weak keys also drop each state as soon as its
+     * repository is collected, instead of holding every state until the coroutine ends.
      */
     protected function state(): object
     {
         if (!Runtime::isSwooleCoroutine()) {
             return $this;
         }
+
         $ctx = Coroutine::getContext();
-        $key = '__rp_' . spl_object_id($this);
-        if (!isset($ctx[$key])) {
+        $states = $ctx[self::STATE_CONTEXT_KEY] ?? null;
+        if (!$states instanceof WeakMap) {
+            $states = new WeakMap();
+            $ctx[self::STATE_CONTEXT_KEY] = $states;
+        }
+
+        if (!isset($states[$this])) {
             $state                  = new stdClass();
             $state->sqlParts        = [];
             $state->entityClassName = $this->entityClassName;
-            $ctx[$key]              = $state;
+            $states[$this]          = $state;
         }
-        return $ctx[$key];
+
+        return $states[$this];
     }
 
     // -------------------------------------------------------------------------
@@ -335,14 +352,14 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     final public function cleanCache(?string $param = null): void
     {
         if (Runtime::isSwooleCoroutine()) {
-            $ctx = Coroutine::getContext();
-            $key = '__rp_' . spl_object_id($this);
+            $states = Coroutine::getContext()[self::STATE_CONTEXT_KEY] ?? null;
+            if (!$states instanceof WeakMap || !isset($states[$this])) {
+                return;
+            }
             if ($param) {
-                if (isset($ctx[$key]->sqlParts[$param])) {
-                    unset($ctx[$key]->sqlParts[$param]);
-                }
+                unset($states[$this]->sqlParts[$param]);
             } else {
-                unset($ctx[$key]); // full reset: re-init from defaults on next state() call
+                unset($states[$this]); // full reset: re-init from defaults on next state() call
             }
         } else {
             if ($param) {
