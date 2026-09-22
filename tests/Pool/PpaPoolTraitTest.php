@@ -21,9 +21,9 @@ final class PpaPoolTraitTest extends TestCase
 
         self::assertSame(5, $config->getPoolMaxConnections());
         self::assertSame(3.0, $config->getPoolWaitTimeout());
-        self::assertSame(0.0, $config->getKeepaliveTime(), 'housekeeping off by default');
-        self::assertSame(0.0, $config->getIdleTimeout(), 'no shrink by default');
-        self::assertSame(0, $config->getMinimumIdle(), 'fully lazy by default');
+        self::assertSame(120.0, $config->getKeepaliveTime(), 'idle connections are kept alive by default');
+        self::assertSame(600.0, $config->getIdleTimeout(), 'and released after ten idle minutes');
+        self::assertSame(0, $config->getMinimumIdle(), 'no warm floor — the pool multiplies by worker');
     }
 
     public function test_property_overrides(): void

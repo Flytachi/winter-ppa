@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.3] — 2026-09-22
+
+### Changed
+
+**Pool housekeeping is on by default.** `PpaPoolTrait` now answers `keepaliveTime` with
+`120.0` (was `0.0`) and `idleTimeout` with `600.0` (was `0.0`); `minimumIdle` stays `0`, and
+`poolMaxConnections` / `poolWaitTimeout` are untouched. A config that declares the property
+itself is unaffected — the trait only supplies what was not set.
+
+Why it matters here: a pool lives in one worker's memory and is only ever examined when
+someone borrows from it, so an application between bursts held its sockets indefinitely and
+never noticed the server (or a firewall) dropping them. The first request back paid for that
+discovery — probing every dead connection and reopening — and, before the matching
+`winter-cpool` fix, failed outright once four or more had died. With these defaults the
+background sweep pings idle connections every two minutes and releases them after ten, so
+neither the database nor the request is left holding the problem.
+
+The numbers are HikariCP's and keep its ordering, `keepaliveTime < idleTimeout < maxLifetime`.
+`minimumIdle` deliberately stays lazy: a warm floor multiplies by `worker_num` here, where
+HikariCP's lives once per JVM.
+
+Requires a `flytachi/winter-cpool` carrying the deadline-bounded `borrow()`; older versions
+honour these values but still count dead connections against a fixed retry budget.
+
 ### Fixed
 
 **Per-coroutine repository state is keyed by the repository object, not by `spl_object_id()`.**
@@ -106,5 +130,6 @@ signatures. Console commands and applications calling those need no edit.
 **The connection pool mechanics** moved to `flytachi/winter-cpool`, where they are shared
 with `flytachi/winter-redis`.
 
+[1.1.3]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.3
 [1.1.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.0
 [1.0.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.0.0

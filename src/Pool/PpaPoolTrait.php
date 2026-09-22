@@ -23,9 +23,15 @@ namespace Flytachi\Winter\Ppa\Pool;
  *
  * @property int   $poolMaxConnections Maximum number of CDO connections in the pool (default: 5).
  * @property float $poolWaitTimeout    Seconds to wait for a free slot before {@see PpaPoolException} (default: 3.0).
- * @property float $keepaliveTime      Background probe of idle connections; 0 = off (default: 0.0). Swoole only.
- * @property float $idleTimeout        Close idle connections after N seconds; 0 = never (default: 0.0). Swoole only.
+ * @property float $keepaliveTime      Background probe of idle connections; 0 = off (default: 120.0). Swoole only.
+ * @property float $idleTimeout        Close idle connections after N seconds; 0 = never (default: 600.0). Swoole only.
  * @property int   $minimumIdle        Warm connection floor; 0 = fully lazy (default: 0). Swoole only.
+ *
+ * The defaults keep `keepaliveTime < idleTimeout < maxLifetime` (120 s / 600 s / 1800 s —
+ * HikariCP's numbers): idle connections are pinged so a firewall or the server itself
+ * cannot drop them unnoticed, and after ten idle minutes they are released instead of
+ * being held all night. `minimumIdle` stays `0` because a warm floor multiplies by worker
+ * count, unlike a pool that lives once per JVM.
  *
  * @link https://winterframe.net/docs/ppa-pooling Connection pool: sizing
  */
@@ -43,12 +49,12 @@ trait PpaPoolTrait
 
     public function getKeepaliveTime(): float
     {
-        return $this->keepaliveTime ?? 0.0;
+        return $this->keepaliveTime ?? 120.0;
     }
 
     public function getIdleTimeout(): float
     {
-        return $this->idleTimeout ?? 0.0;
+        return $this->idleTimeout ?? 600.0;
     }
 
     public function getMinimumIdle(): int
