@@ -22,7 +22,7 @@
     "require": {
         "php": ">=8.4",
         "flytachi/winter-cdo": "^4.0",
-        "flytachi/winter-cpool": "^1.0",
+        "flytachi/winter-cpool": "^1.2",
         "flytachi/winter-base": "^3.0",
         "flytachi/winter-di": "^2.0",
         "flytachi/file-store": "^2.0",

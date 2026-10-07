@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.4] — 2026-10-07
+
+### Fixed
+
+**A transaction left open no longer leaks into the next request.** A request that called
+`beginTransaction()` and never reached `commit()`/`rollBack()` — an exception, an early
+return, a request timeout — returned its connection to the pool with the transaction still
+open. Every later borrower inherited it: plain writes went into that transaction and were
+discarded with it while the request answered 200, and correct code failed on
+`beginTransaction()` with "There is already an active transaction". Under FPM this could not
+happen — the connection died with the request and the driver rolled back on close.
+Reproduced against the real pool and SQLite before the fix.
+
+`CdoConnectionFactory` now implements `ResettableConnectionFactory`: on return it rolls back an
+open transaction and logs **ERROR** naming the config and the coroutine; a connection that
+cannot be rolled back is retired. Rollback, not commit — committing would publish work its
+author never finished. ERROR, not CRITICAL/ALERT — the pool heals itself; what is broken is
+one code path in the application. The clean case costs no round trip (`inTransaction()` is
+the driver's own state).
+
+Not covered: the non-coroutine path (`SingleConnection` in FPM/CLI/plain processes) has no
+return point to reset at.
+
+Requires `flytachi/winter-cpool` `^1.2` (the constraint is raised accordingly).
+
 ## [1.1.3] — 2026-09-22
 
 ### Changed
@@ -55,7 +80,7 @@ only; the FPM path stores state on the object and was never involved. Public beh
 unchanged: per-coroutine isolation, `cleanCache($part)` and the full `cleanCache()` reset all
 work as documented.
 
-## [1.1.0] — Unreleased
+## [1.1.0] — 2026-08-19
 
 ### Added
 
@@ -130,6 +155,8 @@ signatures. Console commands and applications calling those need no edit.
 **The connection pool mechanics** moved to `flytachi/winter-cpool`, where they are shared
 with `flytachi/winter-redis`.
 
+[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.4
 [1.1.3]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.3
 [1.1.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.0
 [1.0.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.0.0

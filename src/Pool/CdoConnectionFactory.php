@@ -6,6 +6,7 @@ namespace Flytachi\Winter\Ppa\Pool;
 
 use Flytachi\Winter\Cdo\Config\Common\DbConfigInterface;
 use Flytachi\Winter\CPool\ConnectionFactory;
+use Flytachi\Winter\CPool\ResettableConnectionFactory;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -21,7 +22,7 @@ use Psr\Log\LoggerInterface;
  *
  * @link https://winterframe.net/docs/ppa-pooling Connection pool
  */
-final readonly class CdoConnectionFactory implements ConnectionFactory
+final readonly class CdoConnectionFactory implements ResettableConnectionFactory
 {
     /**
      * @param class-string<DbConfigInterface> $configClass Config to instantiate per slot.
@@ -73,6 +74,55 @@ final readonly class CdoConnectionFactory implements ConnectionFactory
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Rolls back a transaction the returning unit of work left open.
+     *
+     * Under FPM the connection died with the request and the driver rolled back on
+     * close; a pooled connection outlives the request, so without this the next borrower
+     * inherits the transaction — its writes are lost with it and its own
+     * `beginTransaction()` fails. The rollback is the only outcome that keeps the next
+     * borrower correct: committing would publish work its author never finished.
+     *
+     * Logged at ERROR, not higher: the pool heals itself and keeps serving, but the
+     * application has a defect — a `beginTransaction()` without a `commit()`/`rollBack()`
+     * on some path (an exception, an early return, a request timeout). `transaction()`
+     * closes on every path; prefer it.
+     *
+     * The clean case costs no round trip: `inTransaction()` is answered from the
+     * driver's own state.
+     */
+    public function reset(object $connection): bool
+    {
+        try {
+            /** @var DbConfigInterface $connection */
+            $cdo = $connection->connection();
+            if (!$cdo->inTransaction()) {
+                return true;
+            }
+            $this->logger->error(
+                "{$this->configClass}: connection returned to the pool with an open transaction"
+                . ' (' . self::unitOfWork() . ') — rolled back; its uncommitted work is discarded.'
+                . ' Close every beginTransaction() with commit()/rollBack(), or use transaction().'
+            );
+            $cdo->rollBack();
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error(
+                "{$this->configClass}: could not reset a returned connection — retired: {$e->getMessage()}"
+            );
+            return false;
+        }
+    }
+
+    /** Which unit of work returned the connection — the coroutine id under Swoole. */
+    private static function unitOfWork(): string
+    {
+        if (extension_loaded('swoole') && \Swoole\Coroutine::getCid() > 0) {
+            return 'cid=' . \Swoole\Coroutine::getCid();
+        }
+        return 'pid=' . getmypid();
     }
 
     /** Drops the CDO reference so its socket is closed. */
