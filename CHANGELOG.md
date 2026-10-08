@@ -6,6 +6,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-08
+
+### Fixed
+
+**A lost connection is no longer reported as an open transaction.** pdo_pgsql answers
+`inTransaction()` with `true` for a connection whose last query failed because the connection
+died (its status is "unknown"). The 1.1.4 return-time reset therefore logged a dead connection
+as "returned to the pool with an open transaction" before its rollback failed. It now rolls back
+first: a rollback that goes through was a real transaction (ERROR, as before); one that fails is
+a lost connection — a WARNING, and the connection is retired. Verified on PostgreSQL 16.
+
+### Added
+
+**`PpaConnectionPool::closeBeforeFork()` — a fork no longer costs the parent its session.**
+A forked child gets a copy of every PDO the parent holds, socket included, and cannot let go
+of it quietly: when the child drops the copy — in `reset()`, or simply by exiting — the driver
+tells the server to close the session (Terminate on PostgreSQL, COM_QUIT on MySQL) over the
+socket it shares with the parent. The parent's next query failed with "server closed the
+connection unexpectedly" / "MySQL server has gone away". Reproduced on PostgreSQL 16 and
+MariaDB 11, with a child that never touched the database as much as with one that did.
+`closeBeforeFork()` is called in the parent right before `pcntl_fork()`: it closes the
+non-coroutine connections so the child inherits nothing, and both sides reopen lazily. A
+connection inside a transaction makes it throw `PpaPoolException` instead — closing would roll
+the owner's work back, and keeping it would share the session. Only a connection that still
+answers counts: a dead one (which pdo_pgsql also reports as in a transaction) is just closed. The Winter kernel calls it
+before every fork it makes. The `reset()` docblock no longer claims that forgetting an
+inherited connection leaves the parent's session alone.
+
+**Pool telemetry from processes and daemon workers.** A pool lives in one process, and a web
+worker is not the only process that has one: a managed process and every daemon worker keep a
+pool of their own. Until now only web workers published, so `call db pool` showed nothing of
+them — not even when a process's pool was the one saturated. Each source now publishes under a
+kind and a name:
+
+- `PoolTelemetry::enable(int|string $source, string $kind = PoolTelemetry::KIND_WEB)` —
+  `KIND_WEB` (worker id), `KIND_PROCESS` (class), `KIND_DAEMON` (daemon and slot). The old
+  `enable($workerId)` call is unchanged and still means a web worker.
+- Records carry `kind` and `pid`. A web worker keeps its `worker.N` key; a process or a
+  daemon worker is stored as `{kind}.{source}`, flattened to one file name. A record from an
+  older writer reads as a web worker.
+- `snapshot()` orders web workers first, then processes, then daemon workers.
+- `aggregate(string|array|null $kinds = null)` — one kind, a list, or every source; the last
+  is the number of connections the whole application holds open.
+- `stop()` takes no argument any more (the process knows what it published as); the old
+  `stop($workerId)` call still works.
+
+The framework enables it for processes and daemon workers and stops the publisher when their
+body is done — a repeating timer left behind would keep the process from ending.
+
 ## [1.1.4] — 2026-10-07
 
 ### Fixed
@@ -155,7 +204,8 @@ signatures. Console commands and applications calling those need no edit.
 **The connection pool mechanics** moved to `flytachi/winter-cpool`, where they are shared
 with `flytachi/winter-redis`.
 
-[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.2.0
 [1.1.4]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.4
 [1.1.3]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.3
 [1.1.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.0

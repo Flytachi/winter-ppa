@@ -66,7 +66,7 @@ final class PoolTelemetryStoreTest extends TestCase
     public function testAPublishedRecordCanBeReadBack(): void
     {
         PoolTelemetry::enable(3);
-        new ReflectionMethod(PoolTelemetry::class, 'publish')->invoke(null, 3, 60);
+        new ReflectionMethod(PoolTelemetry::class, 'publish')->invoke(null, 60);
 
         $snapshot = PoolTelemetry::snapshot();
 

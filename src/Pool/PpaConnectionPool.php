@@ -278,27 +278,13 @@ final class PpaConnectionPool
     }
 
     /**
-     * Drops every cached connection, pool and config so the next `db()` opens
-     * fresh sockets — the fork-safety reset.
-     *
-     * A fork copies file descriptors, so any connection cached before the fork
-     * would be shared with the parent and corrupt the wire protocol. A forked
-     * daemon worker runs this through whatever fork hook its framework provides
-     * (the Winter kernel registers one at boot), then re-opens
-     * lazily in the child. Because access is static — repositories call
-     * `PpaConnectionPool::db()`, never an injected instance — clearing the caches
-     * is a complete "reconnect": nothing holds a stale reference.
-     *
-     * Keep connections lazy (do not query from a supervisor before it forks
-     * workers) so this stays a cheap no-op in the common case.
-     */
-    /**
      * Closes every pool and connection this process owns — the worker-shutdown
      * counterpart of {@see reset()}.
      *
-     * The difference matters. {@see reset()} is for a **forked child**, which must
-     * forget inherited sockets without closing them. Here the process genuinely owns
-     * them, so they are closed properly; just as importantly, closing a pool releases
+     * The difference matters. {@see reset()} is for a **forked child**, which must not
+     * close what it inherited — and normally inherits nothing, because the parent ran
+     * {@see closeBeforeFork()}. Here the process genuinely owns them, so they are closed
+     * properly; just as importantly, closing a pool releases
      * its housekeeping timer, and a live timer would keep the worker's reactor from
      * draining until Swoole force-kills it.
      */
@@ -315,12 +301,72 @@ final class PpaConnectionPool
         self::$configs = [];
     }
 
+    /**
+     * Closes this process's own connections before it forks, so the child inherits
+     * nothing — call it in the **parent**, right before `pcntl_fork()`.
+     *
+     * A fork copies the PDO objects together with their sockets, and there is no way to
+     * make a child forget an inherited one quietly: when the child drops the copy — in
+     * {@see reset()}, or simply by exiting — the driver tells the server to close the
+     * session (Terminate on PostgreSQL, COM_QUIT on MySQL) over the socket it shares with
+     * the parent, and the parent's next query fails with "server closed the connection".
+     * Closing in the parent first leaves the child nothing to share; both reopen lazily.
+     *
+     * Covers the non-coroutine connections — the only kind a forking process holds: a
+     * Swoole process spawns coroutines, not forks. A persistent connection
+     * (`getPersistentStatus()`) is out of its reach: PHP keeps the socket in its own list
+     * after the object is gone and hands it to the next `new PDO` with the same DSN — in
+     * the child too. Do not combine persistent connections with forking.
+     *
+     * @throws PpaPoolException When a connection is inside a transaction. Closing it
+     *   would roll the transaction back under its owner, and leaving it open would hand
+     *   the child the same session; neither is acceptable, so the fork is refused.
+     */
+    public static function closeBeforeFork(): void
+    {
+        foreach (self::$static as $connection) {
+            $config = $connection->peek();
+            // A dead pgsql connection also answers inTransaction() = true once a query on
+            // it has failed (its status is "unknown"), so only a connection that still
+            // answers counts as a transaction in progress; a dead one is just closed.
+            if (
+                $config instanceof DbConfigInterface
+                && self::inTransaction($config)
+                && CdoConnectionFactory::probe($config)
+            ) {
+                throw new PpaPoolException(
+                    'PpaConnectionPool: cannot fork while [' . $config::class . '] has an open transaction'
+                    . ' — the child would share its connection. Commit or roll back first.'
+                );
+            }
+        }
+        foreach (self::$static as $connection) {
+            $connection->close();
+        }
+    }
+
+    /**
+     * Drops every cached connection, pool and config so the next `db()` opens
+     * fresh sockets — the fork-safety reset, run in the **child**.
+     *
+     * A fork copies file descriptors, so any connection cached before the fork
+     * would be shared with the parent and corrupt the wire protocol. A forked
+     * daemon worker runs this through whatever fork hook its framework provides
+     * (the Winter kernel registers one at boot), then re-opens
+     * lazily in the child. Because access is static — repositories call
+     * `PpaConnectionPool::db()`, never an injected instance — clearing the caches
+     * is a complete "reconnect": nothing holds a stale reference.
+     *
+     * Dropping an inherited PDO object is **not** harmless: its destructor closes the
+     * server session the parent is still using. This is only safe because the parent
+     * ran {@see closeBeforeFork()} — then there is nothing inherited to drop.
+     */
     public static function reset(): void
     {
         // Abandon (never close) each pool first: a housekeeping Timer::tick callback
         // holds a reference to its pool, so a pool that is merely dereferenced would
         // stay alive and keep maintaining connections this process no longer owns.
-        // abandon() clears that timer without touching the inherited sockets.
+        // abandon() clears that timer and closes nothing itself.
         foreach (self::$pools as $pool) {
             $pool->abandon();
         }
@@ -336,6 +382,16 @@ final class PpaConnectionPool
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
+
+    /** Whether the connection is mid-transaction; a connection that cannot say is not. */
+    private static function inTransaction(DbConfigInterface $config): bool
+    {
+        try {
+            return $config->connection()->inTransaction();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
 
     /**
      * FPM / non-coroutine path: one {@see SingleConnection} per config class for the

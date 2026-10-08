@@ -101,16 +101,19 @@ final readonly class CdoConnectionFactory implements ResettableConnectionFactory
             if (!$cdo->inTransaction()) {
                 return true;
             }
+            // Roll back first, report after: a dead pgsql connection also says it is in a
+            // transaction once a query on it has failed, and only a rollback that goes
+            // through tells a real one from a lost connection.
+            $cdo->rollBack();
             $this->logger->error(
                 "{$this->configClass}: connection returned to the pool with an open transaction"
                 . ' (' . self::unitOfWork() . ') — rolled back; its uncommitted work is discarded.'
                 . ' Close every beginTransaction() with commit()/rollBack(), or use transaction().'
             );
-            $cdo->rollBack();
             return true;
         } catch (\Throwable $e) {
-            $this->logger->error(
-                "{$this->configClass}: could not reset a returned connection — retired: {$e->getMessage()}"
+            $this->logger->warning(
+                "{$this->configClass}: a returned connection could not be reset (lost?) — retired: {$e->getMessage()}"
             );
             return false;
         }

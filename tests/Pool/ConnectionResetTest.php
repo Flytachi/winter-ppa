@@ -110,7 +110,8 @@ final class ConnectionResetTest extends TestCase
 
         self::assertFalse($factory->reset(new class extends StubDbConfig {
         }));
-        self::assertCount(1, $log->messagesAt('error'));
+        self::assertCount(1, $log->messagesAt('warning'), 'a connection that cannot be inspected is reported as lost');
+        self::assertSame([], $log->messagesAt('error'), 'not as an open transaction');
     }
 
     /** The scenario end to end: requests are coroutines sharing one pooled connection. */
