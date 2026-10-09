@@ -6,17 +6,28 @@ namespace Flytachi\Winter\Ppa\Mapping\Structure;
 
 final class Column implements StructureInterface
 {
+    /**
+     * @param Index[] $indexes
+     * @param CheckConstraint|null $checkConstraint A single check — kept for code that
+     *   builds a column by hand; it is put first in $checks. Read $checks instead: this
+     *   property only ever shows the first of them.
+     * @param CheckConstraint[] $checks Every CHECK constraint on the column.
+     */
     public function __construct(
         public string $name,
         public string $type,
         public bool $nullable = true,
         public ?string $default = null,
-        /** @var Index[] */
         public array $indexes = [],
         public ?ForeignKey $foreignKey = null,
         public ?CheckConstraint $checkConstraint = null,
+        public array $checks = [],
     ) {
         NameValidator::validate($name);
+        if ($checkConstraint !== null && !in_array($checkConstraint, $this->checks, true)) {
+            array_unshift($this->checks, $checkConstraint);
+        }
+        $this->checkConstraint = $this->checks[0] ?? null;
     }
 
     public function toSql(string $tableName, string $dialect = 'mysql'): string
@@ -47,8 +58,8 @@ final class Column implements StructureInterface
             $result[] = $this->foreignKey->toSql($tableName, $this->name, $dialect);
         }
 
-        if ($this->checkConstraint) {
-            $result[] = $this->checkConstraint->toSql($tableName, $dialect);
+        foreach ($this->checks as $check) {
+            $result[] = $check->toSql($tableName, $dialect);
         }
 
         return $result;

@@ -6,6 +6,127 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-10-08
+
+### Removed
+
+**`#[TextArray]`.** On PostgreSQL it declared a `TEXT[]` column that ppa could not use: a PHP
+array is bound as JSON (`["a","b"]`), which `TEXT[]` rejects as a malformed array literal, and
+a read hands back `{a,b}` as a string an `array` property cannot take. Elsewhere it was a JSON
+column under another name. It has not been used in practice; use `#[Json]` for an array.
+
+### Fixed
+
+**A failed query no longer stays on the repository.** The builder was reset only after a
+successful execute. A read that failed — the database briefly unavailable, an SQL error — or
+an exception while building (`limit(0)`, a second `from()`, joining a repository without an
+alias) left the query in place, and the next call on the repository ran it: a `findAll()`
+without conditions read the old `WHERE` and `OFFSET` and silently returned the wrong rows, and
+a `findById()` failed on every call, because the old condition's binds were parameters the new
+statement did not have. Inside a coroutine this lasted to the end of the request; outside one —
+a process, a daemon, the CLI — for the life of the process, since an injected repository is a
+singleton. `find()`, `findColumn()`, `findAll()`, `count()` and `exists()` now reset the query
+whether they succeed or fail; a builder method that refuses resets it before throwing; and
+`Paginator::repo()`, `Paginator::cursor()` and `Wrapper::paginator()` reset the repository they
+were given when the page fails — a malformed cursor or `?page=0` comes from a request. Also:
+`where()` called again replaced the condition but kept its binds, so `where(a)->where(b)`
+failed on execute; the binds go with the condition now, as they do with `cleanCache('where')`.
+`limit(10)` after `limit(10, 20)` kept the offset; it starts from the top now. A subquery passed to
+`join*()`, `from()`, `with()` or `union()` had its binds taken before its SQL was built, so one
+that failed to build left them on the outer repository and every later query failed on a
+parameter it did not have; the subquery is built first now, and a failure resets the query.
+Verified on PostgreSQL 16, MySQL 8 and SQLite, outside a coroutine and inside one: 34 ways for a
+call to fail (reads, writes, building, pagination), each followed by reads and writes on the
+same repository. **Behaviour
+change:** code that caught a failed read and ran the same repository again, counting on the
+conditions still being there, must build the query again.
+
+**Column defaults survive an apostrophe, and an array default works on SQLite.** A string
+default was wrapped in quotes as it was, so `public string $publisher = "O'Reilly"` produced
+`DEFAULT 'O'Reilly'` and a syntax error — the same inside a JSON default. An apostrophe is now
+doubled (`'O''Reilly'`), the standard escape on every dialect. An array default had a form for
+PostgreSQL (`'…'::jsonb`) and MySQL (`('…')`) only; SQLite failed with `UnhandledMatchError`
+before any DDL came out — it now gets a plain JSON string literal, and an unsupported dialect
+gets an exception that names it. Generated DDL verified by execution on PostgreSQL 16,
+MySQL 8 and SQLite.
+
+**`#[UuidPk]` creates its table on MySQL and SQLite.** Every dialect but PostgreSQL got
+`DEFAULT UUID()`. MySQL accepts a function as a default only in parentheses, so `CREATE TABLE`
+failed with a syntax error (1064); SQLite has no UUID function at all and failed the same way.
+Only MariaDB, which takes both forms, worked. MySQL and MariaDB now get `DEFAULT (UUID())`, and
+SQLite an expression that builds a version 4 UUID from `randomblob()`; a dialect with no known
+way to generate one gets a `LogicException` naming it instead of MySQL's syntax. Verified by
+execution on PostgreSQL 16, MySQL 8, MariaDB 10.11 and SQLite.
+
+**No CHECK constraint is lost any more — several per column, and on the entity class.** A
+column kept one check: `#[CheckEnum(Status::class), Check("status <> ''")]` emitted only the
+last one, so the enum check silently disappeared, and `#[Check]` could not be repeated at all.
+`#[Check]` is now repeatable, and every check on a property — `#[Check]` and `#[CheckEnum]`
+alike — becomes a constraint of its own. `#[Check]` on the entity class was accepted and
+ignored, so a rule over several columns (`end_at > start_at`) never reached the database; it is
+now a table-level check. `Column` gains `$checks`; its `checkConstraint` parameter still works
+(the check is put first in `$checks`) and the property shows the first check. A second foreign
+key on one property (`#[ForeignKey]` next to `#[ForeignRepo]`) replaced the first silently; it
+is now refused with a `LogicException` — a column references one table, and both keys would get
+the same generated name. `#[CheckEnum]` escaped an apostrophe in a value with a backslash, which
+PostgreSQL and SQLite read as a literal backslash and a broken statement; it is now doubled.
+
+**Pagination refuses a page below one and a negative offset.** `Wrapper::paginator()` turned
+`page: 0` (or a negative page) into a negative offset; `array_slice()` counts that from the
+END, so an in-memory list came back from its tail while the meta reported page 0 with a "next"
+of 1. `Paginator::array()` did the same with a negative `offset`, and `Paginator::repo()` only
+failed inside the repository's own `limit()`. All three now throw `ValueError` up front —
+`Page must be a positive integer (>= 1)` / `Offset must be a non-negative integer (>= 0)` —
+the same way they already refused a size below one. A page number taken from a request should
+be checked in the controller (`#[RequestParam, Min(1)] int $page`), which answers `422`.
+
+**A joined repository's query is no longer dropped — and a nameless subquery is refused.**
+Whether a repository passed to `join*()` became a subquery depended on how many parts it held
+(more than one), with binds counting as a part. So on a repository without an alias a WHERE
+without parameters (`Qb::isNull('deleted_at')`), a `select()` or a `limit()` was a single part
+and **silently dropped** — the join read the bare table, soft-deleted rows included — while a
+WHERE with a parameter became a subquery with no alias, which PostgreSQL and MySQL reject. The
+choice is now made on what the repository holds: no query of its own → its table; a query →
+an aliased subquery with its binds. A query without an alias throws `RepositoryException`
+before anything reaches the database: the `ON` condition refers to an alias only the caller
+knows. **Behaviour change:** code that joined such a repository without an alias — which
+either failed on PostgreSQL/MySQL or lost its condition — now gets the exception; name the
+repository with `instance('o')` or `->as('o')`. Also: a bare repository without an alias no
+longer renders a double space before `ON`.
+
+**`clone` of a repository keeps its query under Swoole.** Inside a coroutine the query state
+(`where()`, joins, alias, `select()`…) lives in a per-coroutine map keyed by the repository,
+not in its properties — so PHP's `clone` copied nothing and the clone came out empty. `clone
+$base` of a repository filtered by user read every row of the table, silently and only under
+Swoole: outside a coroutine (tests, CLI) the properties were copied and the filter held. The
+map is now keyed by a private per-repository key, and `__clone()` gives the clone a key of its
+own and a copy of the original's state, so a clone is the same query in every runtime and
+independent of its original from then on. `Paginator::repo()`'s advice to clone a repository
+before reusing it is now safe. A subclass that defines `__clone()` must call
+`parent::__clone()`.
+
+**`count()` counts the rows the query matches, whatever it is built of.** It used to replace
+the SELECT list with `COUNT(…)`, keep every other part and read the first row. With
+`groupBy()` that was the size of the first group, not the number of groups; with
+`limit(2, 2)` the single count row was skipped by the OFFSET (0); a custom `select('a, b')`
+became `COUNT(a, b)` and failed; a union counted its first part only; and on PostgreSQL an
+`orderBy()` next to `COUNT(*)` failed outright. Now ORDER BY, LIMIT, OFFSET and FOR never take
+part — a paged query counts its total — and a plain filter keeps the same direct SQL as before
+(`SELECT COUNT(*) FROM users WHERE …`). A query with its own select, GROUP BY, HAVING or a
+union is counted as a subquery, `SELECT COUNT(*) FROM (…) AS tmp`, as `Paginator::repo()`
+already did; without a select of its own the inner query selects a constant, so a GROUP BY
+over entity columns stays valid on PostgreSQL and strict MySQL. Verified on PostgreSQL 16,
+MySQL 8 and SQLite.
+
+### Documentation
+
+The README, the internal `docs/` and the framework's PPA pages were audited against the code
+and corrected: failing examples (`upsert()`/`upsertBatch()` with a plain `updateColumns`
+list, `insertBatch()` given an array of rows, `select()` given an array), signatures and
+return values (`getSql()`, `binding()`, `findById()` / `mapIdentifierColumnName()`,
+`*OrThrow` → `EntityException`), per-dialect column types with a SQLite column, the real
+limits of migration idempotency, and the fork, pool and telemetry behaviour of 1.2.0.
+
 ## [1.2.0] — 2026-10-08
 
 ### Fixed
@@ -204,7 +325,8 @@ signatures. Console commands and applications calling those need no edit.
 **The connection pool mechanics** moved to `flytachi/winter-cpool`, where they are shared
 with `flytachi/winter-redis`.
 
-[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/flytachi/winter-ppa/releases/tag/v1.2.1
 [1.2.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.2.0
 [1.1.4]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.4
 [1.1.3]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.3

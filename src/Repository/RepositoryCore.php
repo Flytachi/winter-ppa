@@ -78,6 +78,16 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     protected array $sqlParts = [];
     /** Coroutine-context key under which the per-coroutine {@see WeakMap} of states lives. */
     private const string STATE_CONTEXT_KEY = '__rp_states';
+    /**
+     * This repository's key in the per-coroutine state map — a private object rather than
+     * `$this`, so a clone can find the state it was copied from: {@see __clone()} still
+     * sees the original's key in this property before it takes one of its own.
+     */
+    private ?object $stateKey = null;
+    /** Parts that make a repository a query rather than a bare table (all but alias and binds). */
+    private const array QUERY_PARTS = [
+        'option', 'from', 'join', 'where', 'group', 'having', 'union', 'order', 'limit', 'offset', 'for', 'with',
+    ];
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -165,12 +175,14 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
      * cross-coroutine state corruption when the DI container reuses the same Repository
      * singleton across concurrent requests.
      *
-     * The map must be keyed by the object, never by `spl_object_id()`: PHP recycles an
+     * The map must be keyed by an object, never by `spl_object_id()`: PHP recycles an
      * object id the moment the object is freed, and repositories are overwhelmingly
      * short-lived temporaries (`Repo::instance('c')` handed straight to `joinLeft()`).
      * Keying by id let the next repository to land on that slot inherit the dead one's
      * alias, SELECT, WHERE and entity class. Weak keys also drop each state as soon as its
      * repository is collected, instead of holding every state until the coroutine ends.
+     * The key is the repository's own {@see $stateKey} object, which lives exactly as long
+     * as the repository and lets {@see __clone()} find the state to copy.
      */
     protected function state(): object
     {
@@ -185,14 +197,42 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
             $ctx[self::STATE_CONTEXT_KEY] = $states;
         }
 
-        if (!isset($states[$this])) {
+        $key = $this->stateKey ??= new stdClass();
+        if (!isset($states[$key])) {
             $state                  = new stdClass();
             $state->sqlParts        = [];
             $state->entityClassName = $this->entityClassName;
-            $states[$this]          = $state;
+            $states[$key]           = $state;
         }
 
-        return $states[$this];
+        return $states[$key];
+    }
+
+    /**
+     * Gives a clone the same query as its original — inside a coroutine too.
+     *
+     * Outside a coroutine the state is this object's own properties, and PHP's `clone`
+     * copies them. Inside one it lives in the coroutine's state map instead, so without
+     * this a clone came out with an empty query: `clone $base` of a repository filtered by
+     * user read every row of the table, under Swoole only. The clone takes a key of its own
+     * and a copy of the original's state — the same depth PHP's `clone` gives the
+     * properties — so from here on the two are independent.
+     *
+     * A subclass that defines `__clone()` must call `parent::__clone()`.
+     */
+    public function __clone(): void
+    {
+        $originalKey    = $this->stateKey;
+        $this->stateKey = null;
+        if ($originalKey === null || !Runtime::isSwooleCoroutine()) {
+            return;
+        }
+
+        $states = Coroutine::getContext()[self::STATE_CONTEXT_KEY] ?? null;
+        if ($states instanceof WeakMap && isset($states[$originalKey])) {
+            $this->stateKey         = new stdClass();
+            $states[$this->stateKey] = clone $states[$originalKey];
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -353,16 +393,19 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     {
         if (Runtime::isSwooleCoroutine()) {
             $states = Coroutine::getContext()[self::STATE_CONTEXT_KEY] ?? null;
-            if (!$states instanceof WeakMap || !isset($states[$this])) {
+            $key    = $this->stateKey;
+            if (!$states instanceof WeakMap || $key === null || !isset($states[$key])) {
                 return;
             }
             if ($param) {
-                unset($states[$this]->sqlParts[$param]);
+                $this->dropBindsOf($states[$key], $param);
+                unset($states[$key]->sqlParts[$param]);
             } else {
-                unset($states[$this]); // full reset: re-init from defaults on next state() call
+                unset($states[$key]); // full reset: re-init from defaults on next state() call
             }
         } else {
             if ($param) {
+                $this->dropBindsOf($this, $param);
                 if (isset($this->sqlParts[$param])) {
                     unset($this->sqlParts[$param]);
                 }
@@ -370,6 +413,46 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
                 $this->sqlParts = [];
             }
         }
+    }
+
+    /**
+     * Removes the binds a part's SQL refers to — before the part itself is replaced or
+     * removed. Kept otherwise, they outlive the condition they were made for, and a
+     * parameter the statement does not contain is an error on execute.
+     *
+     * A bind belongs to the part when its placeholder appears there and nowhere else —
+     * generated names are unique, but a hand-named one may be shared with a join or a CTE,
+     * and then it stays.
+     */
+    private function dropBindsOf(object $state, string $part): void
+    {
+        $sql = $state->sqlParts[$part] ?? null;
+        if (!is_string($sql) || empty($state->sqlParts['binds'])) {
+            return;
+        }
+        $elsewhere = '';
+        foreach ($state->sqlParts as $key => $value) {
+            if ($key !== $part && $key !== 'binds' && is_string($value)) {
+                $elsewhere .= ' ' . $value;
+            }
+        }
+        foreach (array_keys($state->sqlParts['binds']) as $name) {
+            $pattern = '/' . preg_quote(':' . ltrim((string) $name, ':'), '/') . '(?![A-Za-z0-9_])/';
+            if (preg_match($pattern, $sql) && !preg_match($pattern, $elsewhere)) {
+                unset($state->sqlParts['binds'][$name]);
+            }
+        }
+    }
+
+    /**
+     * Resets the query, then throws: a half-built query cannot be run, and kept it would
+     * be picked up by the next call on this repository — for the rest of the process, for
+     * a long-lived one.
+     */
+    private function refuse(Throwable $error): never
+    {
+        $this->cleanCache();
+        throw $error;
     }
 
     // -------------------------------------------------------------------------
@@ -387,10 +470,15 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     final public function with(string $name, RepositoryInterface $repository, ?string $modifier = null): static
     {
         $state = $this->state();
+        try {
+            $sql = $repository->buildSql();
+        } catch (Throwable $e) {
+            $this->refuse($e);
+        }
         $this->binding($repository->getSql('binds'));
         $cte = $modifier !== null
-            ? $name . ' AS ' . $modifier . ' (' . $repository->buildSql() . ')'
-            : $name . ' AS (' . $repository->buildSql() . ')';
+            ? $name . ' AS ' . $modifier . ' (' . $sql . ')'
+            : $name . ' AS (' . $sql . ')';
 
         if (isset($state->sqlParts['with'])) {
             $state->sqlParts['with'] .= ', ' . $cte;
@@ -479,16 +567,21 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     {
         $state = $this->state();
         if (isset($state->sqlParts['from'])) {
-            RepositoryException::throw('FROM clause already set: only one FROM source is allowed');
+            $this->refuse(new RepositoryException('FROM clause already set: only one FROM source is allowed'));
         }
         if (is_string($repository)) {
             $state->sqlParts['from'] = $repository;
         } else {
             if (!isset($state->sqlParts['as'])) {
-                RepositoryException::throw('FROM subquery requires an alias: call ->as() before ->from()');
+                $this->refuse(new RepositoryException('FROM subquery requires an alias: call ->as() before ->from()'));
+            }
+            try {
+                $sql = $repository->getSql();
+            } catch (Throwable $e) {
+                $this->refuse($e);
             }
             $this->binding($repository->getSql('binds'));
-            $state->sqlParts['from'] = '(' . $repository->getSql() . ')';
+            $state->sqlParts['from'] = '(' . $sql . ')';
         }
         return $this;
     }
@@ -526,14 +619,55 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
         if (is_string($repository)) {
             return $repository . " ON(" . $onSql . ")";
         }
-        if ($repository->sqlPartsCount() > 1) {
-            $this->binding($repository->getSql('binds'));
-            return '(' . $repository->getSql() . ') '
-                . $repository->getSql('as') . " ON(" . $onSql . ")";
-        } else {
-            return $repository->originTable()
-                . ' ' . $repository->getSql('as') . " ON(" . $onSql . ")";
+        return $this->joinSource($repository) . " ON(" . $onSql . ")";
+    }
+
+    /**
+     * What a joined repository becomes in the JOIN: its table (with its alias, if any)
+     * when it holds no query of its own, otherwise its whole query as an aliased subquery,
+     * whose binds join this repository's.
+     *
+     * The choice is made on what the repository holds — anything besides an alias — and
+     * not on how many parts it has: it used to be "more than one part", with binds counting
+     * as a part, so a WHERE without parameters (`IS NULL`), a select() or a limit() on an
+     * un-aliased repository was a single part and silently dropped, and a WHERE with a
+     * parameter became a subquery with no alias, which PostgreSQL and MySQL reject. A
+     * subquery needs an alias the ON clause can refer to, and only the caller knows it, so
+     * a query without one is refused.
+     *
+     * @throws RepositoryException When the repository holds a query but has no alias.
+     */
+    private function joinSource(RepositoryInterface $repository): string
+    {
+        $alias = $repository->getSql('as');
+        $query = false;
+        foreach (self::QUERY_PARTS as $part) {
+            if ($repository->getSql($part) !== null) {
+                $query = true;
+                break;
+            }
         }
+
+        if (!$query) {
+            return $repository->originTable() . ($alias !== null ? ' ' . $alias : '');
+        }
+        if ($alias === null) {
+            $this->refuse(new RepositoryException(
+                $repository::class . ' joined with a query of its own (conditions, select, order, limit…) becomes'
+                . ' a subquery, and a subquery needs an alias the ON clause can refer to — name it:'
+                . " instance('o') or ->as('o')."
+            ));
+        }
+
+        // The subquery is built before its binds are taken: a build that fails must not
+        // leave them behind as parameters of a statement that never got its subquery.
+        try {
+            $sql = $repository->getSql();
+        } catch (Throwable $e) {
+            $this->refuse($e);
+        }
+        $this->binding($repository->getSql('binds'));
+        return '(' . $sql . ') ' . $alias;
     }
 
     /**
@@ -545,12 +679,7 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     final public function joinCross(string|RepositoryInterface $repository): static
     {
         if (!is_string($repository)) {
-            if ($repository->sqlPartsCount() > 1) {
-                $this->binding($repository->getSql('binds'));
-                $repository = '(' . $repository->getSql() . ') ' . $repository->getSql('as');
-            } else {
-                $repository = $repository->originTable() . ' ' . $repository->getSql('as');
-            }
+            $repository = $this->joinSource($repository);
         }
         $state = $this->state();
         if (isset($state->sqlParts['join'])) {
@@ -648,6 +777,9 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
         if (!is_null($qb)) {
             if ($qb->getQuery()) {
                 $state = $this->state();
+                // Replacing the condition replaces its binds: left behind, the previous
+                // condition's values are parameters the new statement does not have.
+                $this->dropBindsOf($state, 'where');
                 $state->sqlParts['where'] = 'WHERE ' . $qb->getQuery();
                 $this->binding($qb->getBinds());
             }
@@ -775,8 +907,13 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     private function addUnion(RepositoryInterface $repository, string $keyword): static
     {
         $state = $this->state();
+        try {
+            $sql = $repository->buildSql();
+        } catch (Throwable $e) {
+            $this->refuse($e);
+        }
         $this->binding($repository->getSql('binds'));
-        $unionPart = $keyword . ' ' . $repository->buildSql();
+        $unionPart = $keyword . ' ' . $sql;
 
         if (isset($state->sqlParts['union'])) {
             $state->sqlParts['union'] .= ' ' . $unionPart;
@@ -814,15 +951,17 @@ abstract class RepositoryCore implements RepositoryInterface, RepositoryMappingI
     final public function limit(int $limit, int $offset = 0): static
     {
         if ($limit < 1) {
-            throw new ValueError("LIMIT must be a positive integer (>= 1), got: $limit.");
+            $this->refuse(new ValueError("LIMIT must be a positive integer (>= 1), got: $limit."));
         }
         if ($offset < 0) {
-            throw new ValueError("OFFSET must be a non-negative integer (>= 0), got: $offset.");
+            $this->refuse(new ValueError("OFFSET must be a non-negative integer (>= 0), got: $offset."));
         }
         $state = $this->state();
         $state->sqlParts['limit'] = $limit;
         if ($offset > 0) {
             $state->sqlParts['offset'] = $offset;
+        } else {
+            unset($state->sqlParts['offset']); // limit(10) after limit(10, 20) starts from the top
         }
         return $this;
     }

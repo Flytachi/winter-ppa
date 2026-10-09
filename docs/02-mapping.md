@@ -15,22 +15,36 @@ Table  →  DeclarationItem (per config)  →  Declaration
 ```
 
 `Declaration` is what a migration compares against a live schema. It is grouped by config
-instance rather than by table, because two repositories may describe tables on two
-different databases and the comparison happens per connection.
+**class** (`Declaration::push()` compares `$item->config::class`) rather than by table,
+because two repositories may describe tables on two different databases and the
+comparison happens per connection. Two instances of one config class land in one group.
 
 ## The attribute contracts
 
-Every mapping attribute implements one of six interfaces, and the interface — not the
-class name — is what `ColumnMapping` dispatches on.
+Every property-level mapping attribute implements one of the interfaces below, and the
+interface — not the class name — is what `ColumnMapping` dispatches on.
 
 | Contract | Answers | Example |
 | --- | --- | --- |
 | `AttributeDbType` | what SQL type this property is | `#[Varchar(255)]`, `#[Integer]` |
 | `AttributeDbSubType` | what to append to the type | `#[AutoIncrement]` |
 | `AttributeDbIdx` | an index this column takes part in | `#[Primary]`, `#[Unique]`, `#[Index]` |
-| `AttributeDbConstraint` | a table constraint | `#[ForeignKey]`, `#[Check]` |
+| `AttributeDbConstraintForeign` | a foreign key | `#[ForeignKey]`, `#[ForeignRepo]` |
+| `AttributeDbConstraintCheck` | a CHECK constraint | `#[Check]`, `#[CheckEnum]` |
 | `AttributeDbAdditive` | nullability and default | `#[NullableIs]`, `#[DefaultVal]` |
 | `AttributeDbHybrid` | several of the above at once | `#[Id]`, `#[BigId]`, `#[UuidPk]` |
+
+Constraints are dispatched on the two sub-interfaces. Both extend
+`AttributeDbConstraint`, but a class implementing only that parent matches neither branch
+and is ignored — implement `AttributeDbConstraintForeign` or `AttributeDbConstraintCheck`.
+A column collects every check it carries (`Column::$checks`), but takes one foreign key: a
+second one throws `LogicException` instead of replacing the first.
+
+Two more contracts live on classes rather than properties and are not read by
+`ColumnMapping`: `AttributeDbEntity` (`#[Table]` on an entity, read by `PPAMapping`) and
+`AttributeDbConfig` (`#[Extension]`, `#[Migratable]` on a DbConfig class, read by
+`DeclarationItem`). `#[Check]` on the entity class is read by `PPAMapping` too and becomes a
+table-level check (`Table::$checks`).
 
 A hybrid holds no logic of its own: `getInstances()` returns the ordinary attributes it
 stands for, and they go through the same path. `#[Id]` is `Primary` + `AutoIncrement` +
@@ -64,15 +78,19 @@ in one `match`, the reason is visible; spread across three dialect classes, it i
 
 ### Adding a dialect
 
-1. Extend the `match` in every attribute whose SQL differs. A missing arm falls to
-   `default`, which is MySQL-shaped — so an unhandled dialect produces *plausible* wrong
-   DDL rather than an error. Grep for `match ($dialect)` and go through the list.
+1. Extend the `match` in every place whose SQL differs. What a missing arm does is not
+   uniform: in some attributes it falls to a `default` arm that is MySQL-shaped — an
+   unhandled dialect then produces *plausible* wrong DDL rather than an error;
+   `Column::getPrimitiveSqlType()` falls back to `TEXT`; a `match` with no `default`
+   throws `UnhandledMatchError`. Grep for both `match ($dialect)` and
+   `match ($this->dialect)` (`ColumnMapping`) and go through every hit.
 2. Take a golden DDL snapshot **before** the change, and diff it byte for byte after.
 3. Execute the result. A dialect that compiles and does not run is the usual failure.
 
 ### Adding an attribute
 
-1. Pick the contract from the table above; implement it.
+1. Pick the contract from the table above; implement it (for a constraint, one of the two
+   sub-interfaces — never `AttributeDbConstraint` alone).
 2. `supports()` must reject what it cannot render, rather than emit something wrong.
 3. `toSql()` throws for a type it does not accept — see `AutoIncrement`, which refuses
    anything but `SMALLINT`/`INT`/`BIGINT`.

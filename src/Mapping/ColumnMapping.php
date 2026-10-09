@@ -48,8 +48,8 @@ final class ColumnMapping
         $indexes = [];
         /** @var ?ForeignKey $foreignKey */
         $foreignKey = null;
-        /** @var ?CheckConstraint $checkConstraint */
-        $checkConstraint = null;
+        /** @var CheckConstraint[] $checks */
+        $checks = [];
 
         $types = $this->checkingType($property);
         $nullable = null;
@@ -65,7 +65,7 @@ final class ColumnMapping
                 attributeTypeSub: $attributeTypeSub,
                 indexes: $indexes,
                 foreignKey: $foreignKey,
-                checkConstraint: $checkConstraint,
+                checks: $checks,
                 types: $types,
                 nullable: $nullable,
                 default: $default,
@@ -87,11 +87,8 @@ final class ColumnMapping
                         ? 'NULL'
                         : null,
                     'boolean' => $property->getDefaultValue() ? 'TRUE' : 'FALSE',
-                    'string' => "'{$property->getDefaultValue()}'",
-                    'array' => match ($this->dialect) {
-                        'pgsql' => "'" . json_encode($property->getDefaultValue()) . "'::jsonb",
-                        'mysql' => "('" . json_encode($property->getDefaultValue()) . "')",
-                    },
+                    'string' => self::quote($property->getDefaultValue()),
+                    'array' => $this->arrayDefault($property->getDefaultValue()),
                     default => "{$property->getDefaultValue()}"
                 }
                 : null
@@ -105,7 +102,7 @@ final class ColumnMapping
             default: $default,
             indexes: $indexes,
             foreignKey: $foreignKey,
-            checkConstraint: $checkConstraint
+            checks: $checks,
         );
     }
 
@@ -117,7 +114,7 @@ final class ColumnMapping
         ?AttributeDbSubType &$attributeTypeSub,
         array &$indexes,
         ?ForeignKey &$foreignKey,
-        ?CheckConstraint &$checkConstraint,
+        array &$checks,
         array &$types,
         ?bool &$nullable,
         ?string &$default,
@@ -132,7 +129,7 @@ final class ColumnMapping
                     attributeTypeSub: $attributeTypeSub,
                     indexes: $indexes,
                     foreignKey: $foreignKey,
-                    checkConstraint: $checkConstraint,
+                    checks: $checks,
                     types: $types,
                     nullable: $nullable,
                     default: $default,
@@ -168,9 +165,19 @@ final class ColumnMapping
             $indexes[] = $instance->toObject($this->dialect);
         } elseif ($instance instanceof AttributeDbConstraint) {
             if ($instance instanceof AttributeDbConstraintForeign) {
+                // One column, one reference: a second one is a modelling mistake, and both
+                // would get the same generated name. Refused rather than letting the last win.
+                if ($foreignKey !== null) {
+                    throw new \LogicException(
+                        $property->getName() . " in " . $property->getDeclaringClass()->getName() . " "
+                        . $attribute->getName()
+                        . " — the column already has a foreign key to {$foreignKey->referencedTable};"
+                        . " a column can reference one table only"
+                    );
+                }
                 $foreignKey = $instance->toObject($property->getName(), $this->dialect);
             } elseif ($instance instanceof AttributeDbConstraintCheck) {
-                $checkConstraint = $instance->toObject($property->getName(), $this->dialect);
+                $checks[] = $instance->toObject($property->getName(), $this->dialect);
             }
         } elseif ($instance instanceof AttributeDbAdditive) {
             $instance->preparation($nullable, $default);
@@ -202,5 +209,35 @@ final class ColumnMapping
             $types[] = 'null';
         }
         return $types;
+    }
+
+    /**
+     * A string as an SQL literal: an apostrophe inside is doubled — the standard escape, the
+     * same on every supported dialect — so a default such as "O'Reilly" does not end the
+     * literal early and break the statement.
+     */
+    private static function quote(string $value): string
+    {
+        return "'" . str_replace("'", "''", $value) . "'";
+    }
+
+    /**
+     * An array default, stored as JSON — the only array column the mapper knows.
+     *
+     * @throws \LogicException On a dialect without a JSON default form — rather than an
+     *   UnhandledMatchError that names nothing.
+     */
+    private function arrayDefault(array $value): string
+    {
+        $json = self::quote((string) json_encode($value));
+
+        return match ($this->dialect) {
+            'pgsql'  => $json . '::jsonb',
+            'mysql'  => '(' . $json . ')',
+            'sqlite' => $json,
+            default  => throw new \LogicException(
+                "An array default has no form for dialect '{$this->dialect}' (pgsql, mysql, sqlite are supported)."
+            ),
+        };
     }
 }

@@ -12,6 +12,7 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Hybrid\Id;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Index as IndexAttr;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Unique;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Integer;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Json;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Varchar;
 use Flytachi\Winter\Ppa\Mapping\ColumnMapping;
 use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
@@ -50,6 +51,18 @@ final class CmDefaultsEntity
 
     #[NullableIs(false)]
     public ?string $forcedNotNull = null;
+}
+
+final class CmQuotedDefaultsEntity
+{
+    #[Json]
+    public array $meta = ['a' => 1];
+    #[Json]
+    public array $empty = [];
+    #[Json]
+    public array $quoted = ['note' => "O'Reilly"];
+    #[Varchar(40)]
+    public string $publisher = "O'Reilly";
 }
 
 final class CmIdEntity
@@ -171,6 +184,53 @@ final class ColumnMappingTest extends TestCase
     {
         $col = $this->mapProperty(CmDefaultsEntity::class, 'note');
         self::assertSame('NULL', $col->default);
+    }
+
+    // ── array defaults per dialect, and quotes inside literals ──────────────
+    //
+    // An array default used to have a branch for pgsql and mysql only — SQLite failed with
+    // UnhandledMatchError before any DDL came out — and a literal was wrapped in quotes as
+    // it was, so a default containing an apostrophe ("O'Reilly") broke the statement.
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function arrayDefaults(): iterable
+    {
+        yield 'pgsql'          => ['pgsql', 'meta', "'{\"a\":1}'::jsonb"];
+        yield 'mysql'          => ['mysql', 'meta', "('{\"a\":1}')"];
+        yield 'sqlite'         => ['sqlite', 'meta', "'{\"a\":1}'"];
+        yield 'pgsql empty'    => ['pgsql', 'empty', "'[]'::jsonb"];
+        yield 'sqlite empty'   => ['sqlite', 'empty', "'[]'"];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('arrayDefaults')]
+    public function test_an_array_default_renders_for_every_dialect(string $dialect, string $prop, string $expected): void
+    {
+        self::assertSame($expected, $this->mapProperty(CmQuotedDefaultsEntity::class, $prop, $dialect)->default);
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function quotedDefaults(): iterable
+    {
+        yield 'string, pgsql'  => ['pgsql', 'publisher', "'O''Reilly'"];
+        yield 'string, mysql'  => ['mysql', 'publisher', "'O''Reilly'"];
+        yield 'string, sqlite' => ['sqlite', 'publisher', "'O''Reilly'"];
+        yield 'json, pgsql'    => ['pgsql', 'quoted', "'{\"note\":\"O''Reilly\"}'::jsonb"];
+        yield 'json, mysql'    => ['mysql', 'quoted', "('{\"note\":\"O''Reilly\"}')"];
+        yield 'json, sqlite'   => ['sqlite', 'quoted', "'{\"note\":\"O''Reilly\"}'"];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('quotedDefaults')]
+    public function test_an_apostrophe_in_a_default_is_doubled(string $dialect, string $prop, string $expected): void
+    {
+        self::assertSame($expected, $this->mapProperty(CmQuotedDefaultsEntity::class, $prop, $dialect)->default);
+    }
+
+    public function test_an_array_default_on_an_unknown_dialect_names_the_problem(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage("dialect 'oci'");
+
+        $this->mapProperty(CmQuotedDefaultsEntity::class, 'meta', 'oci');
     }
 
     // ── #[DefaultVal] overrides PHP default ─────────────────────────────────

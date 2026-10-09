@@ -6,6 +6,7 @@ namespace Flytachi\Winter\Ppa;
 
 use Flytachi\Winter\Cdo\Config\Common\DbConfigInterface;
 use Flytachi\Winter\Ppa\Entity\RepositoryInterface;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Constraint\Check;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Entity\Table as EntityTable;
 use Flytachi\Winter\Ppa\Mapping\ColumnMapping;
 use Flytachi\Winter\Ppa\Mapping\Structure\Table;
@@ -84,9 +85,15 @@ final class PPAMapping
                 foreach ($reflectionClassEntity->getProperties() as $property) {
                     $columnMap->push($property);
                 }
+                // A #[Check] on the entity class is table-level: a rule over several columns.
+                $checks = [];
+                foreach ($reflectionClassEntity->getAttributes(Check::class) as $attribute) {
+                    $checks[] = $attribute->newInstance()->toObject('', $config->getDriver());
+                }
                 $declaration->push($config, new Table(
                     name: $repository::$table,
                     columns: $columnMap->getColumns(),
+                    checks: $checks,
                     schema: $repository->getSchema(),
                 ));
             } catch (ReflectionException) {

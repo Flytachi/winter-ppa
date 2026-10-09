@@ -17,6 +17,20 @@ any of it changes.
 | [03 — Repository](03-repository.md) | you touch query assembly, hydration, binds or the CRUD/view traits |
 | [04 — Testing](04-testing.md) | a test needs a real database, or you are about to mock one |
 
+## Routes for typical questions
+
+| Question | Go to |
+| --- | --- |
+| A connection died, or a dead one keeps being handed out | [01 — Layers](01-layers.md): deciding that a connection died, `reportFailure()` |
+| A transaction was left open by a request | [01 — Layers](01-layers.md): the return-time reset |
+| Connections break after `pcntl_fork()` | [01 — Layers](01-layers.md): forking |
+| Pool size, timeouts, keepalive | [01 — Layers](01-layers.md): pool knobs |
+| A new column type, attribute or SQL dialect | [02 — Mapping](02-mapping.md) |
+| Query parts leak between requests or coroutines | [03 — Repository](03-repository.md): query state is per coroutine |
+| What a write method returns, which exception a read throws | [03 — Repository](03-repository.md) |
+| A new repository method | [03 — Repository](03-repository.md): adding a method |
+| A test needs a database or coroutines | [04 — Testing](04-testing.md) |
+
 ## Invariants
 
 Five things the package promises. A change that breaks one is a change of contract, not a
@@ -39,8 +53,9 @@ the process. Nothing may hold a `CDO` past its unit of work.
 those parts per coroutine — without it two concurrent requests build each other's queries.
 
 **4. The pooled resource is the config, not the CDO.** The config owns its socket, so
-`close()` is deterministic and `validate()` can reuse the driver's own probe. Pooling a
-bare connection would hand closing to garbage collection.
+`close()` is deterministic. Pooling a bare connection would hand closing to garbage
+collection. `validate()` deliberately does **not** use the driver's `ping()` — it reports
+a dead connection as alive — but runs its own `SELECT 1` (`CdoConnectionFactory::probe()`).
 
 **5. A failed query is never retried.** The pool retires a connection it found dead, but
 replaying the statement is refused: the break may have happened after the server applied

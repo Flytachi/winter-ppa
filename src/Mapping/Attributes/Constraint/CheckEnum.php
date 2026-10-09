@@ -43,7 +43,9 @@ final readonly class CheckEnum implements AttributeDbConstraintCheck
             );
         } else {
             $values = array_map(
-                fn(BackedEnum $case) => "'" . addslashes((string)$case->value) . "'",
+                // The apostrophe is doubled, the standard escape: a backslash is literal on
+                // PostgreSQL and SQLite and would end the string early.
+                fn(BackedEnum $case) => "'" . str_replace("'", "''", (string)$case->value) . "'",
                 $values
             );
         }

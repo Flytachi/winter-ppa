@@ -86,12 +86,47 @@ final class HybridTypesTest extends TestCase
         self::assertSame('gen_random_uuid()', $default);
     }
 
-    public function test_uuid_pk_mysql_uses_uuid_function_default(): void
+    private static function uuidDefault(string $dialect): ?string
     {
-        $instances = (new UuidPk())->getInstances('mysql');
         $nullable = null;
         $default = null;
-        $instances[3]->preparation($nullable, $default);
-        self::assertSame('UUID()', $default);
+        (new UuidPk())->getInstances($dialect)[3]->preparation($nullable, $default);
+        return $default;
+    }
+
+    public function test_uuid_pk_mysql_wraps_the_function_in_parentheses(): void
+    {
+        // A bare DEFAULT UUID() is a syntax error on MySQL 8; MariaDB takes both forms.
+        self::assertSame('(UUID())', self::uuidDefault('mysql'));
+    }
+
+    public function test_uuid_pk_sqlite_builds_a_v4_uuid_from_random_bytes(): void
+    {
+        $default = self::uuidDefault('sqlite');
+        self::assertStringNotContainsString('UUID()', $default, 'SQLite has no UUID function');
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec("CREATE TABLE t (id TEXT NOT NULL DEFAULT {$default}, n INT, PRIMARY KEY (id))");
+        for ($i = 0; $i < 200; $i++) {
+            $pdo->exec('INSERT INTO t (n) VALUES (1)');
+        }
+        $ids = $pdo->query('SELECT id FROM t')->fetchAll(\PDO::FETCH_COLUMN);
+
+        self::assertCount(200, array_unique($ids));
+        foreach ($ids as $id) {
+            self::assertMatchesRegularExpression(
+                '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/',
+                $id,
+            );
+        }
+    }
+
+    public function test_uuid_pk_refuses_an_unknown_dialect(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage("'oracle'");
+
+        (new UuidPk())->getInstances('oracle');
     }
 }

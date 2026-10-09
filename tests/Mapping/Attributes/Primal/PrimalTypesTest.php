@@ -19,7 +19,6 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Integer;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Json;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\SmallInteger;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Text;
-use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\TextArray;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Time;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Timestamp;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\Type;
@@ -140,7 +139,7 @@ final class PrimalTypesTest extends TestCase
         self::assertTrue((new Text())->supports(['mixed']));
     }
 
-    // ── Json / TextArray ─────────────────────────────────────────────────────
+    // ── Json ─────────────────────────────────────────────────────────────────
 
     public function test_json_emits_JSONB_on_pgsql_and_JSON_on_mysql(): void
     {
@@ -157,12 +156,6 @@ final class PrimalTypesTest extends TestCase
         self::assertTrue($j->supports(['array', 'string']));
         self::assertFalse($j->supports(['int']));
         self::assertFalse($j->supports(['array', 'int']));
-    }
-
-    public function test_text_array_emits_pg_array_or_json_fallback(): void
-    {
-        self::assertSame('TEXT[]', (new TextArray())->toSql('pgsql'));
-        self::assertSame('JSON', (new TextArray())->toSql('mysql'));
     }
 
     // ── Float family ─────────────────────────────────────────────────────────

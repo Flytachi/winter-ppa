@@ -15,10 +15,11 @@ use Psr\Log\LoggerInterface;
  * drives.
  *
  * The pooled resource is the **config instance**, not the raw CDO — winter-cdo's
- * config owns the connection (`connection()`/`disconnect()`/`ping()`), so pooling the
- * config lets `close()` deterministically drop the socket and `validate()` reuse the
- * driver's own `SELECT 1` probe. Each {@see create()} builds a fresh config so every
- * pool slot gets an independent socket.
+ * config owns the connection (`connection()`/`disconnect()`), so pooling the config lets
+ * `close()` deterministically drop the socket. `validate()` runs its own `SELECT 1`
+ * ({@see probe()}) rather than the config's `ping()`, which reports a dead connection as
+ * alive. Each {@see create()} builds a fresh config so every pool slot gets an
+ * independent socket.
  *
  * @link https://winterframe.net/docs/ppa-pooling Connection pool
  */

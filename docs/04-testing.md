@@ -3,7 +3,9 @@
 ## Two kinds of test
 
 **Unit** — the mapping, the declaration, the query builder, the pool's decisions. These
-run everywhere and need nothing: 443 of them, in under a second.
+need no database server — some run DDL on in-memory SQLite, some run real Swoole
+coroutines — and finish in under a second: 487 tests, 870 assertions
+(`vendor/bin/phpunit`).
 
 **Integration** — everything that only a real database can answer: DDL a dialect actually
 accepts, an `upsert` that really upserts, a migration applied end to end, a pooled
@@ -18,8 +20,9 @@ see [02 — Mapping](02-mapping.md).
 
 ```bash
 XDEBUG_MODE=off composer test        # phpunit
-XDEBUG_MODE=off composer test-ci     # the same, but skips fail the run
+composer test-detail                 # phpunit --testdox
 composer cs-check                    # phpcs, PSR-12
+composer cs-fix                      # phpcbf
 composer validate --no-check-publish
 ```
 

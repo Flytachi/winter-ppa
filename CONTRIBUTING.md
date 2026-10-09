@@ -14,13 +14,13 @@ concurrency is tested with real coroutines.
 | PostgreSQL / MySQL / MariaDB | integration | dialect output and migrations are checked against real servers |
 
 The integration suites live in the framework repository today, against containers. The
-package's own suite is unit-level and needs nothing.
+package's own suite needs no server: some tests run DDL on in-memory SQLite and some run
+real Swoole coroutines, but nothing external.
 
 ## Running the checks
 
 ```bash
 XDEBUG_MODE=off composer test        # phpunit
-XDEBUG_MODE=off composer test-ci     # the same, but a skipped test fails the run
 composer test-detail                 # phpunit --testdox
 composer cs-check                    # phpcs, PSR-12
 composer cs-fix                      # phpcbf
@@ -56,21 +56,24 @@ simulation of one. Per-coroutine query state is what an innocent-looking refacto
 and it cannot fail in a single-request test.
 
 **Dialect output, byte for byte.** Take a DDL snapshot before the change, diff it after,
-then execute the result. A `match ($dialect)` without an arm for your dialect falls through
-to the MySQL-shaped default — producing plausible wrong DDL rather than an error, which is
-the worst possible failure mode and the reason for the snapshot.
+then execute the result. A dialect `match` without an arm for your dialect may fall through
+to a MySQL-shaped default — producing plausible wrong DDL rather than an error, which is
+the worst possible failure mode and the reason for the snapshot. Grep both
+`match ($dialect)` and `match ($this->dialect)`.
 
 **A regression test must fail before the fix.** Check it by reverting the fix, not by
 reasoning about it. A test that passes against the broken code is worse than no test,
 because it will be trusted.
 
 **The empty case.** Every reader is asked about a row that is not there: `null`, `[]` or
-`0` — never an exception.
+`0` — never an exception (the `*OrThrow` variants exist precisely to throw).
 
 ## Adding to the mapping
 
-An attribute implements exactly one of the six contracts, and `ColumnMapping` dispatches on
-the interface rather than the class. `supports()` must refuse what it cannot render instead
+An attribute implements one of the property contracts, and `ColumnMapping` dispatches on
+the interface rather than the class — for a constraint that means
+`AttributeDbConstraintForeign` or `AttributeDbConstraintCheck`; a class implementing only
+`AttributeDbConstraint` is ignored. `supports()` must refuse what it cannot render instead
 of emitting something wrong, and `toSql()` throws for a type it does not accept — see
 `AutoIncrement`, which rejects everything but `SMALLINT`/`INT`/`BIGINT`. Details in
 [`docs/02-mapping.md`](docs/02-mapping.md).

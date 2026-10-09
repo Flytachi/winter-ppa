@@ -9,6 +9,7 @@ use Flytachi\Winter\Cdo\Qb;
 use Flytachi\Winter\Ppa\Entity\RepositoryInterface;
 use Flytachi\Winter\Ppa\Entity\RepositoryViewInterface;
 use LogicException;
+use Throwable;
 use ValueError;
 
 /**
@@ -46,7 +47,8 @@ final class Paginator
      *     (see {@see RepositoryInterface::buildSql()} with `ignoreParts`).
      *
      * Mutates the repository — calls `$repo->limit($size, $offset)`. If the
-     * caller plans to reuse `$repo` after pagination, clone it beforehand.
+     * caller plans to reuse `$repo` after pagination, clone it beforehand: a clone
+     * carries the whole query, inside a coroutine as much as outside one.
      *
      * Example:
      * ```
@@ -74,7 +76,7 @@ final class Paginator
      * @return ($entityClassName is null
      *             ? PaginationResult<PaginationMeta, TEntity>
      *             : PaginationResult<PaginationMeta, TOverride>) Container with {@see PaginationMeta} and page data.
-     * @throws ValueError When `$size < 1`.
+     * @throws ValueError When `$size < 1` or `$offset < 0`.
      *
      * @link https://winterframe.net/docs/pagination#repo A page by offset
      */
@@ -85,13 +87,19 @@ final class Paginator
         ?string $entityClassName = null,
         ?callable $mapper = null,
     ): PaginationResult {
-        if ($size <= 0) {
-            throw new ValueError("Size must be a positive integer (>= 1), got: $size.");
-        }
+        try {
+            if ($size <= 0) {
+                throw new ValueError("Size must be a positive integer (>= 1), got: $size.");
+            }
+            self::assertOffset($offset);
 
-        $repo->limit($size, $offset);
-        $total = self::calculateTotal($repo);
-        $data = $repo->findAll($entityClassName);
+            $repo->limit($size, $offset);
+            $total = self::calculateTotal($repo);
+            $data = $repo->findAll($entityClassName);
+        } catch (Throwable $e) {
+            $repo->cleanCache(); // a refused or failed page leaves no query behind
+            throw $e;
+        }
 
         return new PaginationResult(
             meta: new PaginationMeta(
@@ -129,7 +137,7 @@ final class Paginator
      *                              Signature: `fn (TItem $item): mixed`. When provided,
      *                              cast the resulting `$data` to your mapper's return type.
      * @return PaginationResult<PaginationMeta, TItem> Container with {@see PaginationMeta} and the sliced page data.
-     * @throws ValueError When `$size < 1`.
+     * @throws ValueError When `$size < 1` or `$offset < 0`.
      *
      * @link https://winterframe.net/docs/pagination#array A page of a list
      */
@@ -142,6 +150,7 @@ final class Paginator
         if ($size <= 0) {
             throw new ValueError("Size must be a positive integer (>= 1), got: $size.");
         }
+        self::assertOffset($offset);
 
         $data = array_slice($items, $offset, $size);
 
@@ -196,34 +205,41 @@ final class Paginator
         ?string $entityClassName = null,
         ?callable $mapper = null,
     ): PaginationResult {
-        if ($size <= 0) {
-            throw new ValueError("Size must be a positive integer (>= 1), got: $size.");
-        }
-
-        $triples   = $key->flatten();
-        $signature = $key->signature();
-
-        $backward = false;
-        if ($cursor !== null) {
-            [$values, $direction] = CursorToken::decode($cursor, $signature);
-            if (count($values) !== count($triples)) {
-                throw new InvalidCursorException(
-                    'Cursor value count does not match key shape (expected '
-                    . count($triples) . ', got ' . count($values) . ').'
-                );
+        try {
+            if ($size <= 0) {
+                throw new ValueError("Size must be a positive integer (>= 1), got: $size.");
             }
-            $backward = $direction === CursorDirection::Backward;
-            $repo->andWhere(self::buildCursorWhere($triples, $values, forward: !$backward));
+
+            $triples   = $key->flatten();
+            $signature = $key->signature();
+
+            $backward = false;
+            if ($cursor !== null) {
+                [$values, $direction] = CursorToken::decode($cursor, $signature);
+                if (count($values) !== count($triples)) {
+                    throw new InvalidCursorException(
+                        'Cursor value count does not match key shape (expected '
+                        . count($triples) . ', got ' . count($values) . ').'
+                    );
+                }
+                $backward = $direction === CursorDirection::Backward;
+                $repo->andWhere(self::buildCursorWhere($triples, $values, forward: !$backward));
+            }
+
+            // Paginator owns ORDER BY — invert direction when navigating backward,
+            // so the DB returns the rows immediately adjacent to the cursor (not
+            // the extreme N rows on the wrong side).
+            $repo->orderBy(self::buildCursorOrderBy($triples, invert: $backward));
+
+            // Fetch +1 to detect whether more pages exist in the navigation direction.
+            $repo->limit($size + 1);
+            $list  = $repo->findAll($entityClassName);
+        } catch (Throwable $e) {
+            // A malformed cursor comes from the request: refusing it must not leave the
+            // caller's conditions on the repository for its next query.
+            $repo->cleanCache();
+            throw $e;
         }
-
-        // Paginator owns ORDER BY — invert direction when navigating backward,
-        // so the DB returns the rows immediately adjacent to the cursor (not
-        // the extreme N rows on the wrong side).
-        $repo->orderBy(self::buildCursorOrderBy($triples, invert: $backward));
-
-        // Fetch +1 to detect whether more pages exist in the navigation direction.
-        $repo->limit($size + 1);
-        $list  = $repo->findAll($entityClassName);
         $extra = count($list) > $size;
         if ($extra) {
             array_pop($list); // drop the probe row
@@ -427,5 +443,18 @@ final class Paginator
         $stmt->getStmt()->execute();
 
         return (int) $stmt->getStmt()->fetchColumn();
+    }
+
+    /**
+     * An offset is where a page starts, so it cannot be negative — array_slice() would
+     * count a negative one from the END and answer with the tail of the list.
+     *
+     * @throws ValueError When `$offset < 0`.
+     */
+    private static function assertOffset(int $offset): void
+    {
+        if ($offset < 0) {
+            throw new ValueError("Offset must be a non-negative integer (>= 0), got: $offset.");
+        }
     }
 }

@@ -51,7 +51,7 @@ final class Wrapper
      *
      * @return WrapResult<TItem> Typed page-centric response (`JsonSerializable`).
      *
-     * @throws ValueError When `$limit < 1`.
+     * @throws ValueError When `$limit < 1` or `$page < 1`.
      *
      * @link https://winterframe.net/docs/pagination#wrapperpaginator Numbered pages
      */
@@ -63,7 +63,12 @@ final class Wrapper
         ?callable $mapper = null,
     ): WrapResult {
         if ($limit < 1) {
-            throw new ValueError("Size must be a positive integer (>= 1), got: $limit.");
+            self::refuse($repo, new ValueError("Size must be a positive integer (>= 1), got: $limit."));
+        }
+        // A page below one used to become a negative offset: the list's tail came back while
+        // the meta said page 0 with a "next" of 1. Pages are numbered from one.
+        if ($page < 1) {
+            self::refuse($repo, new ValueError("Page must be a positive integer (>= 1), got: $page."));
         }
 
         $offset = $limit * ($page - 1);
@@ -91,5 +96,20 @@ final class Wrapper
             ),
             data: $data,
         );
+    }
+
+    /**
+     * Throws, resetting a repository's query first: the page number usually comes from a
+     * request, and refusing it must not leave the caller's conditions behind for the next
+     * query on the repository.
+     *
+     * @param array<mixed>|RepositoryViewInterface $repo
+     */
+    private static function refuse(array|RepositoryViewInterface $repo, ValueError $error): never
+    {
+        if ($repo instanceof RepositoryViewInterface) {
+            $repo->cleanCache();
+        }
+        throw $error;
     }
 }

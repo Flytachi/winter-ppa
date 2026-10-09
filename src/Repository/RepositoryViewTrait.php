@@ -19,7 +19,10 @@ use Throwable;
  *
  * Implements {@see RepositoryViewInterface} by building SQL via {@see RepositoryCore},
  * executing it through CDO, and hydrating results into the configured entity class.
- * All methods call {@see cleanCache()} after execution to reset the query builder state.
+ * Every method that runs the built query resets it afterwards with {@see cleanCache()} —
+ * when it fails too. A query is used once: kept after a failure, its conditions, offset
+ * and binds would be picked up by the next call on the repository, and a repository
+ * injected into a process or a daemon lives as long as the process.
  *
  * Mix into any {@see RepositoryCore} subclass that needs read access:
  * ```
@@ -73,7 +76,7 @@ trait RepositoryViewTrait
     /**
      * Executes the built query and returns the first matching row, or null.
      *
-     * Automatically applies `LIMIT 1`. Calls {@see cleanCache()} after execution.
+     * Automatically applies `LIMIT 1`. Resets the query afterwards, on failure too.
      *
      * @template TOverride of object
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
@@ -90,18 +93,19 @@ trait RepositoryViewTrait
             $stmt = new CDOStatement($this->db()->prepare($this->buildSql()));
             $this->useBind($stmt);
             $stmt->getStmt()->execute();
-            $this->cleanCache();
             return $stmt->getStmt()->fetchObject($resolvedClass) ?: null;
         } catch (Throwable $th) {
             PpaConnectionPool::reportFailure($this->dbConfigClassName, $th);
             throw new RepositoryException($th->getMessage(), previous: $th);
+        } finally {
+            $this->cleanCache();
         }
     }
 
     /**
      * Executes the built query and returns a single column value from the first row.
      *
-     * Automatically applies `LIMIT 1`. Calls {@see cleanCache()} after execution.
+     * Automatically applies `LIMIT 1`. Resets the query afterwards, on failure too.
      *
      * @param int $column Zero-based column index (default 0)
      * @return mixed Column value, or false if no row found
@@ -116,18 +120,19 @@ trait RepositoryViewTrait
             $stmt = new CDOStatement($this->db()->prepare($this->buildSql()));
             $this->useBind($stmt);
             $stmt->getStmt()->execute();
-            $this->cleanCache();
             return $stmt->getStmt()->fetchColumn($column);
         } catch (Throwable $th) {
             PpaConnectionPool::reportFailure($this->dbConfigClassName, $th);
             throw new RepositoryException($th->getMessage(), previous: $th);
+        } finally {
+            $this->cleanCache();
         }
     }
 
     /**
      * Executes the built query and returns all matching rows.
      *
-     * Calls {@see cleanCache()} after execution.
+     * Resets the query afterwards, on failure too.
      *
      * @template TOverride of object
      * @param class-string<TOverride>|null $entityClassName Override entity class for hydration.
@@ -143,19 +148,25 @@ trait RepositoryViewTrait
             $stmt = new CDOStatement($this->db()->prepare($this->buildSql()));
             $this->useBind($stmt);
             $stmt->getStmt()->execute();
-            $this->cleanCache();
             return $stmt->getStmt()->fetchAll(PDO::FETCH_CLASS, $resolvedClass);
         } catch (Throwable $th) {
             PpaConnectionPool::reportFailure($this->dbConfigClassName, $th);
             throw new RepositoryException($th->getMessage(), previous: $th);
+        } finally {
+            $this->cleanCache();
         }
     }
 
     /**
-     * Returns the row count for the built query using `COUNT(*)`.
+     * Returns how many rows the built query matches — ORDER BY, LIMIT, OFFSET and FOR
+     * never take part, so a paged query counts its total, not its page.
      *
-     * If a custom {@see select()} is already set, wraps it: `COUNT(custom_expr)`.
-     * Calls {@see cleanCache()} after execution.
+     * A plain filter keeps the direct form, `SELECT COUNT(*) FROM … WHERE …`. A query whose
+     * rows are not plain table rows — a custom {@see select()}, GROUP BY, HAVING or a union —
+     * is counted as a subquery, `SELECT COUNT(*) FROM (…) AS tmp`, the way
+     * {@see \Flytachi\Winter\Ppa\Pagination\Paginator::repo()} counts: a grouped query
+     * counts its groups, a union both parts, `select('a, b')` its rows.
+     * Resets the query afterwards, on failure too.
      *
      * @return int Row count
      * @throws RepositoryException
@@ -165,24 +176,59 @@ trait RepositoryViewTrait
     final public function count(): int
     {
         try {
-            $state = $this->state();
-            $state->sqlParts['option'] = 'COUNT(' . ($state->sqlParts['option'] ?? '*') . ')';
-            $stmt = new CDOStatement($this->db()->prepare($this->buildSql()));
+            $stmt = new CDOStatement($this->db()->prepare($this->countSql()));
             $this->useBind($stmt);
             $stmt->getStmt()->execute();
-            $this->cleanCache();
             return (int) $stmt->getStmt()->fetchColumn();
         } catch (Throwable $th) {
             PpaConnectionPool::reportFailure($this->dbConfigClassName, $th);
             throw new RepositoryException($th->getMessage(), previous: $th);
+        } finally {
+            $this->cleanCache();
         }
+    }
+
+    /**
+     * The SQL {@see count()} runs: the direct `COUNT(*)` for a plain filter, the query
+     * wrapped as a subquery otherwise. Leaves the builder state as it found it.
+     */
+    private function countSql(): string
+    {
+        $parts  = $this->state()->sqlParts;
+        $ignore = ['order', 'limit', 'offset', 'for'];
+
+        $plain = !isset($parts['option']) && !isset($parts['group'])
+            && !isset($parts['having']) && !isset($parts['union']);
+        if ($plain) {
+            $this->state()->sqlParts['option'] = 'COUNT(*)';
+            try {
+                return $this->buildSql($ignore);
+            } finally {
+                unset($this->state()->sqlParts['option']);
+            }
+        }
+
+        // Without a select of its own the inner query would list every entity column, and
+        // with GROUP BY that is invalid on PostgreSQL and strict MySQL. Counting needs no
+        // columns, so the inner query selects a constant — except in a union, whose parts
+        // must keep matching column lists.
+        if (!isset($parts['option']) && !isset($parts['union'])) {
+            $this->state()->sqlParts['option'] = '1';
+            try {
+                return 'SELECT COUNT(*) FROM (' . $this->buildSql($ignore) . ') AS tmp';
+            } finally {
+                unset($this->state()->sqlParts['option']);
+            }
+        }
+
+        return 'SELECT COUNT(*) FROM (' . $this->buildSql($ignore) . ') AS tmp';
     }
 
     /**
      * Returns true if at least one row matches the built query.
      *
      * Uses `SELECT 1 LIMIT 1` internally for efficiency.
-     * Calls {@see cleanCache()} after execution.
+     * Resets the query afterwards, on failure too.
      *
      * @return bool
      * @throws RepositoryException
@@ -198,11 +244,12 @@ trait RepositoryViewTrait
             $stmt = new CDOStatement($this->db()->prepare($this->buildSql()));
             $this->useBind($stmt);
             $stmt->getStmt()->execute();
-            $this->cleanCache();
             return (bool) $stmt->getStmt()->fetchColumn();
         } catch (Throwable $th) {
             PpaConnectionPool::reportFailure($this->dbConfigClassName, $th);
             throw new RepositoryException($th->getMessage(), previous: $th);
+        } finally {
+            $this->cleanCache();
         }
     }
 

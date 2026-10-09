@@ -165,6 +165,76 @@ final class CoroutineStateTest extends TestCase
         self::assertSame(0, $counts['afterRelease'], 'the state outlived its repository');
     }
 
+    // ── clone ───────────────────────────────────────────────────────────────
+    //
+    // Inside a coroutine the state is not a property of the repository, so PHP's own
+    // `clone` cannot copy it. A clone came out empty: `clone $base` of a repository
+    // filtered by user read every row of the table — under Swoole only, while the same
+    // code outside a coroutine (tests, CLI) kept the filter.
+
+    public function test_a_clone_keeps_the_conditions_inside_a_coroutine(): void
+    {
+        $sql = self::inCoroutine(static function (): string {
+            $base = UsersRepo::instance('u')->where(Qb::eq('u.id', 7))->orderBy('u.id');
+            $copy = clone $base;
+
+            return $copy->getSql();
+        });
+
+        self::assertSame('SELECT * FROM users u WHERE u.id = :v ORDER BY u.id', self::norm($sql));
+    }
+
+    public function test_a_clone_is_independent_of_its_original(): void
+    {
+        $out = self::inCoroutine(static function (): array {
+            $base = UsersRepo::instance()->where(Qb::eq('id', 7));
+            $copy = clone $base;
+            $copy->limit(5);
+            $base->orderBy('id');
+
+            return [$base->getSql(), $copy->getSql()];
+        });
+
+        self::assertSame('SELECT * FROM users WHERE id = :v ORDER BY id', self::norm($out[0]), 'the original is untouched by the clone');
+        self::assertSame('SELECT * FROM users WHERE id = :v LIMIT 5', self::norm($out[1]), 'the clone is untouched by the original');
+    }
+
+    public function test_a_clone_keeps_a_select_switch_to_stdclass(): void
+    {
+        $class = self::inCoroutine(static function (): string {
+            $copy = clone TypedUsersRepo::instance()->select('id');
+
+            return $copy->getEntityClassName();
+        });
+
+        self::assertSame(\stdClass::class, $class);
+    }
+
+    public function test_a_clone_behaves_the_same_outside_a_coroutine(): void
+    {
+        $base = UsersRepo::instance('u')->where(Qb::eq('u.id', 7))->orderBy('u.id');
+        $copy = clone $base;
+
+        self::assertSame('SELECT * FROM users u WHERE u.id = :v ORDER BY u.id', self::norm($copy->getSql()));
+    }
+
+    public function test_a_clones_state_is_released_with_the_clone(): void
+    {
+        $counts = self::inCoroutine(static function (): array {
+            $base = UsersRepo::instance()->where(Qb::eq('id', 1));
+            $copy = clone $base;
+            $copy->getSql();
+            $held = count(self::stateMap());
+
+            unset($copy);
+
+            return ['held' => $held, 'afterRelease' => count(self::stateMap())];
+        });
+
+        self::assertSame(2, $counts['held'], 'the original and the clone, each with its own state');
+        self::assertSame(1, $counts['afterRelease'], 'the clone\'s state outlived it');
+    }
+
     // ── cleanCache() over the new store ─────────────────────────────────────
 
     public function test_clean_cache_with_a_part_removes_only_that_part(): void

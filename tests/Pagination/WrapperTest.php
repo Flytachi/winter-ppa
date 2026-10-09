@@ -79,6 +79,32 @@ final class WrapperTest extends TestCase
         Wrapper::paginator(range(1, 5), limit: 0);
     }
 
+    /** @return iterable<string, array{int}> */
+    public static function pagesBelowOne(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('pagesBelowOne')]
+    public function test_a_page_below_one_is_refused(int $page): void
+    {
+        // It used to become a negative offset, and array_slice() answered with the TAIL of
+        // the list while the meta reported page 0 with a "next" of 1.
+        $this->expectException(ValueError::class);
+        $this->expectExceptionMessage("Page must be a positive integer (>= 1), got: {$page}.");
+
+        Wrapper::paginator(range(1, 10), limit: 5, page: $page);
+    }
+
+    public function test_page_one_is_still_the_first_page(): void
+    {
+        $page = Wrapper::paginator(range(1, 10), limit: 5, page: 1);
+
+        self::assertSame([1, 2, 3, 4, 5], $page->data);
+        self::assertNull($page->meta->previous);
+    }
+
     public function test_without_the_package_the_signature_is_the_guard(): void
     {
         // Nothing can satisfy RepositoryViewInterface unless the package that declares it

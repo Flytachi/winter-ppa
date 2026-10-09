@@ -68,7 +68,8 @@ class UserRepository extends Repository
 ```
 
 The `@extends` line is what makes `findById()` return `?UserEntity` instead of `object`;
-the code works without it, the editor does not.
+the code works without it, the editor does not. `MainDbConfig` is any winter-cdo config
+class — one extending `PgDbConfig`, `MySqlDbConfig` or `SqliteDbConfig`.
 
 Ask it questions:
 
@@ -78,11 +79,14 @@ use Flytachi\Winter\Cdo\Qb;
 $user  = UserRepository::instance()->findById(42);
 $users = UserRepository::instance('u')
     ->where(Qb::eq('u.status', 'active'))
-    ->orderBy('u.created_at DESC')
+    ->orderBy('u.id DESC')
     ->limit(20)
     ->findAll();
 
-$id = UserRepository::instance()->insert(['email' => $email, 'status' => 'active']);
+$new = new UserEntity();
+$new->email  = $email;
+$new->status = 'active';
+$id = UserRepository::instance()->insert($new);
 ```
 
 No connection to obtain, none to return. The connection is taken on the first query and
@@ -103,7 +107,8 @@ database and shows what it would change before doing it.
 
 **Connections that heal.** An idle connection is probed before it is handed over, an aged
 one is rotated ahead of time, and the number is capped per worker. A database restart stops
-poisoning a worker for the rest of its life.
+poisoning a worker for the rest of its life. A connection handed back with a transaction
+still open is rolled back (and logged) before anyone else borrows it.
 
 **Correctness under concurrency.** A repository may be a container singleton while serving
 concurrent coroutines: its query state is isolated per coroutine, so two requests cannot
@@ -112,6 +117,10 @@ build each other's conditions.
 **Failures that are classified, not guessed.** A dead connection is retired; a constraint
 violation leaves the connection alone. Where the driver's verdict is uninformative — as
 PostgreSQL's is when the socket is gone — the pool probes instead of parsing the message.
+
+**Pagination and pool telemetry.** `Paginator` pages a repository by offset or by keyset
+cursor; `PoolTelemetry` lets each worker publish its pool utilisation so a separate
+process (`call db pool`) can read the whole fleet.
 
 ---
 
@@ -128,11 +137,15 @@ $repo->findByIdOrThrow($id);        // instead of the null check
 $repo->insert($entity);             $repo->insertBatch(...$entities);
 $repo->update($entity, Qb::eq('id', $id));
 $repo->delete(Qb::lt('created_at', $cutoff));
-$repo->upsert($entity, ['email']);  $repo->upsertBatch(['email'], ...$entities);
+$repo->upsert($entity, ['email']);  // conflict on email: DO NOTHING, stored row kept
+$repo->upsert($entity, ['email'], ['status' => ':new']);         // conflict: take the incoming status
+$repo->upsertBatch($entities, ['email'], ['status' => ':new']);
+// ':new' is the incoming value, ':current' the stored one; a plain list
+// such as ['status'] is refused with a RepositoryException
 
 // assembling
 UserRepository::instance('u')
-    ->select(['u.id', 'COUNT(o.id) AS orders'])
+    ->select('u.id, COUNT(o.id) AS orders')
     ->joinLeft(OrderRepository::instance('o'), 'o.user_id = u.id')
     ->where(Qb::eq('u.status', 'active'))
     ->groupBy('u.id')
@@ -160,12 +173,20 @@ PoolTelemetry::setStoreProvider(fn() => $storage);           // unset: nothing i
 ```
 
 Each default is the inert one deliberately: a library that logs somewhere by itself, or
-imposes a timezone on your session, is a library that surprises you. Fork safety and
-shutdown are yours to call as well — `PpaConnectionPool::reset()` in a forked child (which
-forgets sockets **without** closing them, since the descriptors are shared with the
-parent), `shutdown()` when a worker exits.
+imposes a timezone on your session, is a library that surprises you. The timezone provider
+is consulted only on the coroutine (pooled) path; the single connection outside a
+coroutine never receives a `SET TIMEZONE` from it.
 
-Inside the Winter kernel all of this is installed at boot.
+Fork safety and shutdown are yours to call as well. Dropping an inherited PDO in a forked
+child closes the server session the parent is still using (Terminate on PostgreSQL,
+COM_QUIT on MySQL), so the **parent** calls `PpaConnectionPool::closeBeforeFork()` right
+before `pcntl_fork()`: it closes the process's non-coroutine connections, and throws
+`PpaPoolException` if a live one is inside a transaction (a dead one is simply closed).
+The child then calls `reset()`, which is safe only because there is nothing inherited left
+to drop. `shutdown()` closes everything when a worker exits.
+
+Inside the Winter kernel all of this is installed at boot, and the kernel makes both fork
+calls itself.
 
 ---
 

@@ -6,6 +6,7 @@ namespace Flytachi\Winter\Ppa\Tests\Repository;
 
 use Flytachi\Winter\Cdo\Qb;
 use Flytachi\Winter\Ppa\Tests\Repository\Fixtures\OrdersRepo;
+use Flytachi\Winter\Ppa\Repository\RepositoryException;
 use Flytachi\Winter\Ppa\Tests\Repository\Fixtures\UsersRepo;
 use PHPUnit\Framework\TestCase;
 
@@ -112,5 +113,87 @@ final class JoinBuilderTest extends TestCase
         $binds = $r->getSql('binds');
         self::assertIsArray($binds);
         self::assertNotEmpty($binds);
+    }
+
+    // ── a repository's query is joined whole, or the join is refused ─────────
+    //
+    // Whether a joined repository became a subquery used to depend on how many parts it
+    // held (more than one), not on what they were — and binds count as a part. So a
+    // WHERE without parameters (IS NULL), a select() or a limit() on an un-aliased
+    // repository was one part and silently dropped: the join read the bare table. A WHERE
+    // with a parameter made two parts and became a subquery with no alias, which
+    // PostgreSQL and MySQL reject.
+
+    private static function norm(string $sql): string
+    {
+        return preg_replace('/:iqb\d+/', ':v', $sql);
+    }
+
+    public function test_a_where_without_parameters_on_an_aliased_repository_is_kept(): void
+    {
+        $sql = UsersRepo::instance('u')
+            ->joinLeft(OrdersRepo::instance('o')->where(Qb::isNull('o.deleted_at')), 'o.user_id = u.id')
+            ->buildSql();
+
+        self::assertSame(
+            'SELECT * FROM users u LEFT JOIN (SELECT * FROM orders o WHERE o.deleted_at IS NULL) o ON(o.user_id = u.id)',
+            $sql,
+        );
+    }
+
+    public function test_a_select_on_an_aliased_repository_is_kept(): void
+    {
+        $sql = UsersRepo::instance('u')
+            ->joinLeft(OrdersRepo::instance('o')->select('o.user_id'), 'o.user_id = u.id')
+            ->buildSql();
+
+        self::assertSame('SELECT * FROM users u LEFT JOIN (SELECT o.user_id FROM orders o) o ON(o.user_id = u.id)', $sql);
+    }
+
+    /** @return iterable<string, array{callable(): OrdersRepo}> */
+    public static function unaliasedQueries(): iterable
+    {
+        yield 'where with a parameter' => [static fn() => OrdersRepo::instance()->where(Qb::gt('total', 100))];
+        yield 'where without parameters' => [static fn() => OrdersRepo::instance()->where(Qb::isNull('deleted_at'))];
+        yield 'select' => [static fn() => OrdersRepo::instance()->select('user_id')];
+        yield 'limit' => [static fn() => OrdersRepo::instance()->limit(1)];
+        yield 'order' => [static fn() => OrdersRepo::instance()->orderBy('id')];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unaliasedQueries')]
+    public function test_a_query_without_an_alias_is_refused_instead_of_dropped(callable $make): void
+    {
+        try {
+            UsersRepo::instance('u')->joinLeft($make(), 'o.user_id = u.id');
+            self::fail('a joined query without an alias must be refused');
+        } catch (RepositoryException $e) {
+            self::assertStringContainsString('alias', $e->getMessage());
+            self::assertStringContainsString(OrdersRepo::class, $e->getMessage());
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unaliasedQueries')]
+    public function test_cross_join_refuses_a_query_without_an_alias_too(callable $make): void
+    {
+        $this->expectException(RepositoryException::class);
+        UsersRepo::instance('u')->joinCross($make());
+    }
+
+    public function test_a_bare_repository_without_an_alias_still_joins_by_table_name(): void
+    {
+        $sql = UsersRepo::instance('u')->joinLeft(OrdersRepo::instance(), 'orders.user_id = u.id')->buildSql();
+
+        self::assertSame('SELECT * FROM users u LEFT JOIN orders ON(orders.user_id = u.id)', $sql);
+    }
+
+    public function test_a_where_with_a_parameter_brings_its_bind_along(): void
+    {
+        $r = UsersRepo::instance('u')->joinLeft(OrdersRepo::instance('o')->where(Qb::gt('o.total', 100)), 'o.user_id = u.id');
+
+        self::assertSame(
+            'SELECT * FROM users u LEFT JOIN (SELECT * FROM orders o WHERE o.total > :v) o ON(o.user_id = u.id)',
+            self::norm($r->buildSql()),
+        );
+        self::assertCount(1, $r->getSql('binds'));
     }
 }
