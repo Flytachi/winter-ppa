@@ -63,6 +63,12 @@ The defer captures the `BorrowedConnection` **directly** rather than reading it 
 the context, which may already be tearing down. The object carries the `dead` flag, so
 `reportFailure()` can turn a release into an eviction after the fact.
 
+`releaseCurrent()` gives the coroutine's connections back before it ends — for a coroutine
+that lives on long after its last query, a Server-Sent Events stream above all, which would
+otherwise hold one for as long as the tab is open. It sets the `released` flag, so the defer
+does nothing, and drops the entry from the context, so the next query borrows again. A
+connection inside a transaction is kept, with a warning.
+
 ### The return-time reset
 
 `CdoConnectionFactory` implements winter-cpool's `ResettableConnectionFactory`, so the pool

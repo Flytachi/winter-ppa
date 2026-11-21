@@ -259,6 +259,61 @@ final class PpaConnectionPool
     }
 
     /**
+     * Gives back, now, every connection this coroutine holds — instead of when the
+     * coroutine ends. The next query in it borrows again.
+     *
+     * A coroutine keeps the connection it first queried on until it finishes. For a
+     * request that is right; for a request that goes on long after its last query it
+     * is a connection nobody uses: a Server-Sent Events stream whose middleware read
+     * the session holds one for as long as the tab is open, and a few open tabs empty
+     * the pool for every other request of the worker. Call this when the coroutine is
+     * done with the database for a while.
+     *
+     * A connection inside a transaction is kept, with a warning: given back, it would
+     * hand the open transaction to the next borrower — or, reset on return, roll back
+     * writes the coroutine still means to commit.
+     *
+     * Outside a coroutine (FPM, a process without coroutines) it does nothing: there
+     * the connection belongs to the process.
+     */
+    public static function releaseCurrent(): void
+    {
+        if (!Runtime::isSwooleCoroutine()) {
+            return;
+        }
+        $ctx = \Swoole\Coroutine::getContext();
+        $cid = \Swoole\Coroutine::getCid();
+        $held = [];
+        foreach ($ctx as $key => $value) {
+            if (is_string($key) && str_starts_with($key, 'ppa_cdo_') && $value instanceof BorrowedConnection) {
+                $held[$key] = $value;
+            }
+        }
+        foreach ($held as $key => $connection) {
+            $configClass = (string) base64_decode(substr($key, strlen('ppa_cdo_')), true);
+            $config = $connection->entry->resource;
+            if ($config instanceof DbConfigInterface && self::inTransaction($config)) {
+                self::logger()->warning(
+                    "cid={$cid} kept: {$configClass} (a transaction is open — commit or roll it back first)"
+                );
+                continue;
+            }
+            unset($ctx[$key]);
+            $connection->released = true;
+            $pool = self::$pools[base64_encode($configClass)] ?? null;
+            if ($pool === null) {
+                continue;
+            }
+            if ($connection->dead) {
+                $pool->evict($connection->entry);
+                continue;
+            }
+            self::logger()->debug("cid={$cid} release (early): {$configClass}");
+            $pool->release($connection->entry);
+        }
+    }
+
+    /**
      * Live utilisation of every Swoole coroutine pool, keyed by config FQCN — the
      * HikariCP-style view (active / idle / total vs maximum) for `/actuator/health`.
      *
@@ -451,6 +506,9 @@ final class PpaConnectionPool
             // $held is captured directly — safer than reading from $ctx during teardown —
             // and carries the verdict {@see reportFailure()} may have left on it.
             \Swoole\Coroutine::defer(static function () use ($pool, $held, $cid, $configClass): void {
+                if ($held->released) {
+                    return;   // given back early, by releaseCurrent()
+                }
                 if ($held->dead) {
                     self::logger()->warning("cid={$cid} evict: {$configClass} (connection lost in use)");
                     $pool->evict($held->entry);

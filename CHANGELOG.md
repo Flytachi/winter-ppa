@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Known issues (not fixed yet, to decide)
+
+**`#[Unique(method: …)]` does not work.** The parameter is accepted, but `Unique::toObject()`
+always builds a `BTREE` index (`src/Mapping/Attributes/Idx/Unique.php`): asking for `HASH`, `GIN`
+or any other method silently gives a B-tree, and nothing says so. A unique index is a B-tree
+almost everywhere anyway — PostgreSQL supports `UNIQUE` on btree only, MySQL has HASH indexes
+in the MEMORY engine only — so the likely fix is to refuse a non-`BTREE` method with a clear
+error, keeping the parameter for those who pass `BTREE` explicitly. The docs (entities page)
+already say the parameter is ignored.
+
+**`PpaConnectionPool::showDbConfigs()` docblock** says it serves "diagnostics / health checks";
+the kernel's `/actuator/health` does not use it (it scans and builds fresh config instances).
+The docblock should say diagnostics only.
+
+## [1.3.0] — 2026-11-21
+
+### Added
+
+- **`PpaConnectionPool::releaseCurrent()` — a coroutine gives its connection back when it is
+  done with the database, not only when it ends.** A coroutine kept the connection of its
+  first query until it finished: right for a request, wrong for one that lives on long after
+  its last query. A Server-Sent Events stream whose middleware read the session held a pooled
+  connection for as long as the tab stayed open, and a few open tabs emptied the pool for
+  every other request of the worker. Now the connections are returned at once and the next
+  query in the coroutine borrows again; the defer that would have returned them does nothing.
+  A connection inside a transaction is kept, with a warning: given back, it would hand the
+  transaction to the next borrower or roll back writes still meant to be committed. Outside a
+  coroutine it does nothing. The kernel calls it when a stream starts (winter-kernel 4.7.1).
+
+### Changed
+
+- Requires **winter-cpool `^1.3`** — a liveness probe that does not answer (a socket dropped
+  in silence) is no longer waited for — and **winter-cdo `^4.1`** — PostgreSQL connections
+  carry `tcp_user_timeout`, so a query on such a socket fails in 10 s instead of hanging for
+  minutes, and a worker's stop no longer waits for it.
+
 ## [1.2.1] — 2026-10-08
 
 ### Removed
