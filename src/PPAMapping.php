@@ -100,6 +100,7 @@ final class PPAMapping
                 $table->entity = $reflectionClassEntity->getName();
                 $table->renamedFrom = ($reflectionClassEntity->getAttributes(RenamedFrom::class)[0] ?? null)
                     ?->newInstance()->from;
+                $table->renamedFromUnresolved = RenamedFrom::unresolvedOn($reflectionClassEntity);
                 $declaration->push($config, $table);
             } catch (ReflectionException) {
             }

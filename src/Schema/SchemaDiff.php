@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Schema;
 
+use Flytachi\Winter\Ppa\Mapping\Attributes\Migration\RenamedFrom;
+
 /**
  * What a snapshot records: the changes from the model the history folds to the model the
  * entities declare — or why it cannot record them.
@@ -63,6 +65,10 @@ final class SchemaDiff
     ): self {
         $d = new self();
         $d->objects($objects, $declared, $drop);
+        foreach ($declared['unresolved'] ?? [] as $who) {
+            $d->errors[] = "{$who}: #[RenamedFrom] is written without its `use` — PHP takes it for another class "
+                . 'and the rename is not seen. Add `use ' . RenamedFrom::class . ';`.';
+        }
         $history = $d->renamedTables($history, $declared, $versions, $driver);
         $to = $declared['model'];
         foreach ($to as $table => $want) {

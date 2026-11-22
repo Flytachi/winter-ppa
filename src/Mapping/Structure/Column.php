@@ -24,6 +24,8 @@ final class Column implements StructureInterface
         public array $checks = [],
         // The column's name in the last schema snapshot, from #[RenamedFrom]; DDL ignores it.
         public ?string $renamedFrom = null,
+        /** A #[RenamedFrom] written without its `use` — said by the snapshot. */
+        public bool $renamedFromUnresolved = false,
     ) {
         NameValidator::validate($name);
         if ($checkConstraint !== null && !in_array($checkConstraint, $this->checks, true)) {

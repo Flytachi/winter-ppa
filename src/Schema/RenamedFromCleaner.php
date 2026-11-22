@@ -87,6 +87,11 @@ final class RenamedFromCleaner
     {
         $count = count($tokens);
         for ($k = $from + 1; $k < $count; $k++) {
+            if ($tokens[$k]->id === T_ATTRIBUTE) {
+                // Another attribute of the same thing (#[Check(…)]): its brackets are not the target's.
+                $k = self::group($tokens, $k)[0];
+                continue;
+            }
             if ($tokens[$k]->id === T_VARIABLE) {
                 return substr($tokens[$k]->text, 1);
             }

@@ -81,6 +81,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`snapshot clean` left a `#[RenamedFrom]` that another attribute with arguments followed**
+  (`#[RenamedFrom('x')]` above `#[Varchar(32)]`, or above `#[Check(…)]` on a class): it took the
+  neighbour's `(` for the end of the search. It skips the other attributes now.
+- **A `#[RenamedFrom]` written without its `use` was not seen** — PHP takes it for a class of the
+  file's namespace and says nothing; a `snapshot clean` removes the `use` with the last one, so the
+  next is easily written without it. The snapshot says so now, with the `use` to add.
 - **SQLite: a CHECK added to a table that exists was `ALTER TABLE … ADD CONSTRAINT`** — new to
   SQLite (3.54 has it; 3.40–3.46, what PHP ships on most servers and CI runners, says "syntax
   error"). A version is recorded once and applied by any SQLite, so it is now refused like a

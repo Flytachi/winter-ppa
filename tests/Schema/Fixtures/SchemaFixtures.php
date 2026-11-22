@@ -30,6 +30,7 @@ final class SchemaFixtures
             $t = new Table(name: $name, columns: $mapping->getColumns(), schema: $schema);
             $t->entity = $class;
             $t->renamedFrom = (new ReflectionClass($class)->getAttributes(RenamedFrom::class)[0] ?? null)?->newInstance()->from;
+            $t->renamedFromUnresolved = RenamedFrom::unresolvedOn(new ReflectionClass($class));
             $tables[] = $t;
         }
         return $tables;

@@ -59,6 +59,7 @@ final class SchemaModel
         $schemas = [];
         $ext = [];
         $renamedTables = [];
+        $unresolved = [];
         if ($driver === 'pgsql') {
             foreach ($extensions as $e) {
                 $ext[$e->name] = rtrim($e->toSql('pgsql'), ';');
@@ -83,6 +84,15 @@ final class SchemaModel
             if ($table->entity !== null) {
                 $entities[$name] = $table->entity;
             }
+            $who = $table->entity ?? $name;
+            if ($table->renamedFromUnresolved) {
+                $unresolved[] = $who;
+            }
+            foreach ($table->columns as $column) {
+                if ($column->renamedFromUnresolved) {
+                    $unresolved[] = "{$who}::\${$column->name}";
+                }
+            }
             if ($table->renamedFrom !== null && $table->renamedFrom !== '') {
                 // A name without a schema is in the schema the table is in now.
                 $renamedTables[$name] = str_contains($table->renamedFrom, '.') || $table->schema === null
@@ -103,6 +113,7 @@ final class SchemaModel
             'schemas' => array_values($schemas),
             'extensions' => $ext,
             'renamedTables' => $renamedTables,
+            'unresolved' => $unresolved,
         ];
     }
 

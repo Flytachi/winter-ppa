@@ -37,4 +37,21 @@ final readonly class RenamedFrom
     public function __construct(public string $from)
     {
     }
+
+    /**
+     * Whether a class or a property has a #[RenamedFrom] that names no class — written
+     * without its `use` (a `snapshot clean` takes the `use` away with the last one): PHP says
+     * nothing of an attribute of an unknown class, so the rename would go unseen.
+     */
+    public static function unresolvedOn(\ReflectionClass|\ReflectionProperty $on): bool
+    {
+        foreach ($on->getAttributes() as $a) {
+            $name = $a->getName();
+            $short = substr($name, (int) strrpos('\\' . $name, '\\'));
+            if ($name !== self::class && $short === 'RenamedFrom' && !class_exists($name)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

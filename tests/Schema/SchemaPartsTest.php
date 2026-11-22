@@ -273,6 +273,16 @@ final class SchemaPartsTest extends TestCase
 
             #[Table, RenamedFrom('order')]
             class Order {}
+
+            #[Table]
+            #[RenamedFrom('goods')]
+            #[Check("price >= 0", name: 'chk_price')]
+            class Product
+            {
+                #[RenamedFrom('qty')]
+                #[Varchar(32)]
+                public string $quantity = '';
+            }
             PHP;
 
         $out = RenamedFromCleaner::clean($src, ['@Client']);
@@ -282,6 +292,13 @@ final class SchemaPartsTest extends TestCase
         self::assertStringContainsString("#[RenamedFrom('mail')]", $out['source'], 'the property keeps its own');
         self::assertStringContainsString("#[Table, RenamedFrom('order')]", $out['source'], 'another class keeps its own');
         self::assertSame(1, RenamedFromCleaner::clean($out['source'], ['@Order'])['removed']);
+
+        // Another attribute with arguments after it — on a class and on a property.
+        $product = RenamedFromCleaner::clean($out['source'], ['@Product', 'quantity']);
+        self::assertSame(2, $product['removed']);
+        self::assertStringNotContainsString("RenamedFrom('goods')", $product['source']);
+        self::assertStringNotContainsString("RenamedFrom('qty')", $product['source']);
+        self::assertStringContainsString("#[Check(\"price >= 0\", name: 'chk_price')]", $product['source']);
     }
 
     public function test_clean_removes_a_recorded_attribute_on_its_own_line_and_its_use(): void

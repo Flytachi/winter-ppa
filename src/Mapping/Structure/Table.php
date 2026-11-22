@@ -18,6 +18,9 @@ final class Table implements StructureInterface
     /** Its name in the last snapshot, from #[RenamedFrom] on the entity class — for schema snapshots. */
     public ?string $renamedFrom = null;
 
+    /** A #[RenamedFrom] on the entity class written without its `use` — said by the snapshot. */
+    public bool $renamedFromUnresolved = false;
+
     /** The entity class the table was mapped from, when it was — for schema snapshots. */
     public ?string $entity = null;
 

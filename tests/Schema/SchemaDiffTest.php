@@ -14,6 +14,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/Fixtures/SchemaFixtures.php';
+require_once __DIR__ . '/Fixtures/NotImported.php';
 
 /**
  * What `db snapshot` records, and what it refuses: it never guesses a rename, never drops
@@ -263,6 +264,19 @@ final class SchemaDiffTest extends TestCase
         $diff = $this->diff(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV3::class]);
 
         self::assertStringContainsString('the foreign key fk_orders_customer_id points at customers, renamed to clients', implode("\n", $diff->errors));
+    }
+
+    public function test_a_renamed_from_written_without_its_use_is_an_error(): void
+    {
+        // What PHP makes of #[RenamedFrom] in a file without the `use`: another class, unknown.
+        $this->record(['customers' => F\CustomerV2::class, 'orders' => F\OrderV1::class]);
+        $tables = F\SchemaFixtures::tables('pgsql', ['clients' => F\ClientNotImported::class, 'orders' => F\OrderV1::class]);
+
+        $diff = SchemaSnapshot::diff($this->history, $tables, 'pgsql');
+
+        $all = implode("\n", $diff->errors);
+        self::assertStringContainsString('ClientNotImported: #[RenamedFrom] is written without its `use`', $all);
+        self::assertStringContainsString('ClientNotImported::$mail: #[RenamedFrom] is written without its `use`', $all);
     }
 
     public function test_renamed_from_a_table_that_is_not_there_is_an_error(): void

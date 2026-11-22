@@ -105,6 +105,7 @@ final class ColumnMapping
             foreignKey: $foreignKey,
             checks: $checks,
             renamedFrom: ($property->getAttributes(RenamedFrom::class)[0] ?? null)?->newInstance()->from,
+            renamedFromUnresolved: RenamedFrom::unresolvedOn($property),
         );
     }
 
