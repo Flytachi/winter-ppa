@@ -2,5 +2,6 @@
 <ruleset name="CustomRules">
     <rule ref="PSR12"/>
     <exclude-pattern>tests</exclude-pattern>
+    <exclude-pattern>e2e</exclude-pattern>
     <exclude-pattern>vendor</exclude-pattern>
 </ruleset>

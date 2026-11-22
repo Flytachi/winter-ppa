@@ -19,7 +19,8 @@ final class Unique implements AttributeDbIdx
         private readonly ?string $name = null,
         public IndexMethod $method = IndexMethod::BTREE,
         private readonly ?string $where = null,
-        private readonly ?string $opClass = null
+        private readonly ?string $opClass = null,
+        private readonly array $include = [],
     ) {
     }
 
@@ -36,8 +37,11 @@ final class Unique implements AttributeDbIdx
             columns: $this->columns,
             name: $this->name,
             type: IndexType::UNIQUE,
-            method: IndexMethod::BTREE,
+            // As declared: a unique index of another method is refused by SchemaCheck, not
+            // turned into a B-tree without a word.
+            method: $this->method,
             where: $this->where,
+            includeColumns: $this->include,
             opClass: $this->opClass
         );
     }

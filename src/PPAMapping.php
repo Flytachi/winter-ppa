@@ -90,12 +90,14 @@ final class PPAMapping
                 foreach ($reflectionClassEntity->getAttributes(Check::class) as $attribute) {
                     $checks[] = $attribute->newInstance()->toObject('', $config->getDriver());
                 }
-                $declaration->push($config, new Table(
+                $table = new Table(
                     name: $repository::$table,
                     columns: $columnMap->getColumns(),
                     checks: $checks,
                     schema: $repository->getSchema(),
-                ));
+                );
+                $table->entity = $reflectionClassEntity->getName();
+                $declaration->push($config, $table);
             } catch (ReflectionException) {
             }
         }

@@ -6,6 +6,101 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Schema versions — a database's schema follows the entities, version by version.** The entities
+  stay the only description of the schema; `Schema\SchemaSnapshot` freezes what changed since the
+  last version into `ppa/<Config>/V<nnn>_<name>.json` (`V001`, `V002`… — the next one is the last
+  number + 1, so the files sort as they apply) — only that version's changes — and
+  `Schema\SchemaMigrator` brings a database to the last version: a fresh database is created from
+  the last version's model at once, a database made before there was a history gets a baseline
+  (the latest version it matches), any other gets the versions it lacks, each in a transaction of
+  its own, its steps checked against the live database first (nothing is created to find out it
+  exists — no "already exists" errors in the server's log), then the database checked against the
+  version's model. Columns are added, renamed, changed (a widening — a longer VARCHAR, a wider
+  integer or DECIMAL — by itself), dropped; indexes and constraints follow. It never guesses: a
+  rename needs `#[RenamedFrom('old')]` on the property, a dropped column or table `--drop`, a
+  column gone from the entity may be kept in the database (`--keep`), a NOT NULL column without a
+  default is refused for a table with rows.
+- **`VersionCode` — the code of a version** (`#[SchemaVersion('V007')]`, in `custom/` of the folder — the written files apart from the generated ones —
+  in the namespace of its config, so a version of the same name in two databases loads in one process): `before()`
+  on the old schema, `after()` on the new one and for what the kernel does not change itself
+  (`"by": "code"`: a type narrowed, a primary key, a SQLite table rebuild). A version may be code
+  only — data moved, no schema change. Not run on a fresh database: it has no rows to change.
+- **`winter_ppa_schema_history`** in the database itself (in the config's schema on PostgreSQL),
+  one history per owner — `(owner, version)`, the owner being the config's class name — so two
+  configs or an application and a package share a database without their V001s meeting:
+  version, name, checksum of its files, code, state, when, how long, by which database user, and a
+  copy of the JSON it applied. A version edited after it was applied, a version whose files are
+  gone, a version older than the last applied one — refused before anything runs.
+- **A schema lock** — PostgreSQL advisory lock, MySQL/MariaDB `GET_LOCK` — so two instances
+  starting at once migrate once.
+- **`Schema\SchemaInspector`** — reads tables, columns, primary keys, indexes and constraints from
+  a live database (PostgreSQL, MySQL, MariaDB, SQLite), leaving out what the server adds itself
+  (MySQL's index for a foreign key, MariaDB's CHECK on a JSON column).
+- **`RenamedFromCleaner`** — removes a `#[RenamedFrom]` the history has recorded, token by token.
+- Tested on PostgreSQL 16, MariaDB 10.11, MySQL 8.0 and SQLite 3.54: `PPA_PG`, `PPA_MARIA`,
+  `PPA_MYSQL` (`host:port:database:user:password`) enable the live scenarios, SQLite always runs.
+
+- **Schemas and extensions in the versions.** A table in a PostgreSQL schema of its own (`shop.orders`)
+  and an `#[Extension]` of the config are recorded by the snapshot (`createSchema`, `createExtension`,
+  first in their version) and made first on a fresh database; one already there is not made again.
+  Never dropped by a snapshot: an extension no longer declared is said and stays.
+- **`Schema\SchemaCheck` — what a server would not build as declared, said before anything runs**:
+  `call db snapshot` records nothing with an error, `call db sql` says it, `call db migrate` of 4.x
+  creates nothing for that database. Not the mapping: an index made long ago never stops a start.
+  Errors: GIN / GiST on MySQL / MariaDB; a partial unique index there (without its WHERE it would be
+  unique over every row); a unique index of another method than B-tree; HASH of several columns on
+  PostgreSQL; GIN / GiST on a plain column without its operator class or `btree_gin` / `btree_gist`;
+  an operator class without its extension (`gin_trgm_ops` → `pg_trgm`); two indexes of one name.
+  Notices: what a server leaves out and only costs speed or size.
+- **`#[Index(include: [...])]` / `#[Unique(include: [...])]`** — PostgreSQL's covering index
+  (`INCLUDE`); left out elsewhere, with a notice.
+
+- **E2E on GitHub Actions** (`e2e/`, `.github/workflows/e2e.yml`): an application's life on a live
+  PostgreSQL — six tables with every attribute, 22 schema versions (columns added, renamed,
+  dropped; every index and foreign key remade; types widened and narrowed; NOT NULL over NULLs; a
+  primary key changed; tables made and dropped; versions with code) over tables full of rows,
+  applied one by one, all at once and from a random stop; the three end with the same schema.
+  Then what must be refused. See `e2e/README.md`.
+
+### Fixed
+
+- **A PostgreSQL array column (`#[Type('TEXT[]')]`) failed the check after its version**: the
+  server names it `_text`, the model `TEXT[]` — "expected text[], found _text". One spelling now.
+- **The same version code met twice in a process was a fatal "cannot redeclare class"** — a
+  history in another folder (a release beside the old one), or a class an autoloader loaded
+  first. The same code is the class already there; other code under a name already taken is
+  said, with what to do.
+- **An index of another method than B-tree has it in its name** — `orders_note_gin_idx`,
+  `users_email_hash_idx` — so a column may have a B-tree and a GIN index side by side: both were
+  `<table>_<column>_idx`, the second failed with "already exists" and the schema model kept one.
+  B-tree and unique names are as they were. **An existing HASH / GIN / GiST index gets a new
+  name**: the next snapshot records it dropped and made again; `call db migrate` of 4.x makes the
+  new one beside the old — drop the old by hand.
+- **MySQL / MariaDB: `method:` wrote invalid SQL** (`ON t USING HASH (c)`, a syntax error) — and
+  with the right one InnoDB builds a B-tree all the same. The index is now a B-tree, said by a
+  notice; GIN / GiST are refused. An operator class, written into the column list (a syntax error
+  on MySQL, MariaDB and SQLite), is left out there.
+- **MySQL / MariaDB: `where:` was dropped without a word** — a partial unique index became unique
+  over every row. A plain one is built whole with a notice, a unique one refused.
+- **`#[Unique(method: …)]` was turned into a B-tree without a word** — now the method reaches the
+  check, which refuses anything but B-tree.
+- **`#[CheckEnum(name: …)]` was ignored**: the constraint got a hashed name. It gets the name.
+- **`CREATE SCHEMA public`** — the always-there schema was created again by `call db migrate` of
+  4.x, an "already exists" error in the server's log at every run. Not created; any other with
+  `IF NOT EXISTS`.
+
+### Limits of schema versions
+
+**On MySQL and MariaDB a version is not atomic.** Their schema changes commit at once: a
+version that fails half-way is recorded `failed`, and runs again from its start next time — its
+done steps are skipped, its code must be safe to repeat.
+
+**On SQLite** a version cannot change a column, add a foreign key to an existing table or drop a
+constraint by itself: a snapshot says so and asks for a custom version (a table rebuild in
+`after()`).
+
 ### Known issues (not fixed yet, to decide)
 
 **`#[Unique(method: …)]` does not work.** The parameter is accepted, but `Unique::toObject()`

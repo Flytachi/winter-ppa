@@ -22,6 +22,8 @@ final class Column implements StructureInterface
         public ?ForeignKey $foreignKey = null,
         public ?CheckConstraint $checkConstraint = null,
         public array $checks = [],
+        // The column's name in the last schema snapshot, from #[RenamedFrom]; DDL ignores it.
+        public ?string $renamedFrom = null,
     ) {
         NameValidator::validate($name);
         if ($checkConstraint !== null && !in_array($checkConstraint, $this->checks, true)) {

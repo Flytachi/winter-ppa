@@ -12,6 +12,7 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Constraint\AttributeDbConstraintForei
 use Flytachi\Winter\Ppa\Mapping\Attributes\Hybrid\AttributeDbHybrid;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\AttributeDbIdx;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Index;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Migration\RenamedFrom;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\AttributeDbType;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Sub\AttributeDbSubType;
 use Flytachi\Winter\Ppa\Mapping\Structure\CheckConstraint;
@@ -103,6 +104,7 @@ final class ColumnMapping
             indexes: $indexes,
             foreignKey: $foreignKey,
             checks: $checks,
+            renamedFrom: ($property->getAttributes(RenamedFrom::class)[0] ?? null)?->newInstance()->from,
         );
     }
 

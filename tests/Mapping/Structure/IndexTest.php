@@ -54,10 +54,27 @@ final class IndexTest extends TestCase
         self::assertSame('PRIMARY KEY (id)', $sql);
     }
 
-    public function test_mysql_using_method_emitted_when_non_btree(): void
+    public function test_mysql_builds_a_btree_for_hash_without_using(): void
     {
+        // `ON users USING HASH (email)` is a syntax error on MySQL and MariaDB, and with the
+        // right syntax InnoDB builds a B-tree all the same: no USING, SchemaCheck says so.
         $sql = (new Index(columns: ['email'], method: IndexMethod::HASH))->toSql('users', 'mysql');
-        self::assertSame('CREATE INDEX users_email_idx ON users USING HASH (email)', $sql);
+        self::assertSame('CREATE INDEX users_email_hash_idx ON users (email)', $sql);
+    }
+
+    public function test_mysql_and_sqlite_leave_out_what_is_postgresql_s(): void
+    {
+        $index = new Index(columns: ['name'], method: IndexMethod::GIN, where: 'name <> \'\'', includeColumns: ['id'], opClass: 'gin_trgm_ops');
+        self::assertSame('CREATE INDEX users_name_gin_idx ON users (name)', $index->toSql('users', 'mysql'));
+        self::assertSame("CREATE INDEX users_name_gin_idx ON users (name) WHERE name <> ''", $index->toSql('users', 'sqlite'));
+    }
+
+    public function test_a_method_other_than_btree_is_in_the_name(): void
+    {
+        self::assertSame('users_email_idx', (new Index(columns: ['email']))->nameFor('users'));
+        self::assertSame('users_email_hash_idx', (new Index(columns: ['email'], method: IndexMethod::HASH))->nameFor('users'));
+        self::assertSame('users_tags_gin_idx', (new Index(columns: ['tags'], method: IndexMethod::GIN))->nameFor('users'));
+        self::assertSame('users_x_idx', (new Index(columns: ['tags'], name: 'x', method: IndexMethod::GIN))->nameFor('users'));
     }
 
     // ── pgsql ────────────────────────────────────────────────────────────────
@@ -110,7 +127,7 @@ final class IndexTest extends TestCase
         $sql = (new Index(columns: ['name'], method: IndexMethod::GIN, opClass: 'gin_trgm_ops'))
             ->toSql('users', 'pgsql');
         self::assertSame(
-            'CREATE INDEX users_name_idx ON users USING GIN (name gin_trgm_ops)',
+            'CREATE INDEX users_name_gin_idx ON users USING GIN (name gin_trgm_ops)',
             $sql,
         );
     }

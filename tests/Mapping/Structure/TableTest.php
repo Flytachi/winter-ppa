@@ -52,9 +52,15 @@ final class TableTest extends TestCase
     public function test_create_schema_emits_only_for_pgsql(): void
     {
         $table = new Table('users', columns: [], schema: 'app');
-        self::assertSame('CREATE SCHEMA app;', $table->createSchemaIfNotExists('pgsql'));
+        self::assertSame('CREATE SCHEMA IF NOT EXISTS app;', $table->createSchemaIfNotExists('pgsql'));
         self::assertNull($table->createSchemaIfNotExists('mysql'));
         self::assertNull($table->createSchemaIfNotExists('sqlite'));
+    }
+
+    public function test_public_is_never_created(): void
+    {
+        // It is always there: CREATE SCHEMA public is an "already exists" in the server's log.
+        self::assertNull((new Table('users', columns: [], schema: 'public'))->createSchemaIfNotExists('pgsql'));
     }
 
     // ── toSql() — minimal ────────────────────────────────────────────────────

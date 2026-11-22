@@ -52,7 +52,8 @@ final readonly class CheckEnum implements AttributeDbConstraintCheck
         $values = implode(', ', $values);
 
         return new CheckConstraint(
-            expression: "{$columnName} IN ({$values})"
+            expression: "{$columnName} IN ({$values})",
+            name: $this->name,
         );
     }
 }

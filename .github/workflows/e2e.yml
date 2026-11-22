@@ -1,0 +1,64 @@
+name: E2E
+
+# The life of an application on a live database: 22 schema versions of six tables, with data,
+# applied one by one (A), all at once (B) and in two runs from a stop picked at random (C);
+# the three must end with the same schema. Then what must be refused. See e2e/README.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      stop:
+        description: 'Variant C: stop at stage-3 #… (5–9; empty = random)'
+        required: false
+
+jobs:
+  postgres:
+    name: PostgreSQL ${{ matrix.postgres }} · PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5']
+        postgres: ['18']
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      E2E_PG: 127.0.0.1:5432:e2e:postgres:test
+      E2E_STOP: ${{ github.event.inputs.stop }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Schema tests on PostgreSQL
+        run: |
+          PGPASSWORD=test psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE schema_tests'
+          PPA_PG=127.0.0.1:5432:schema_tests:postgres:test vendor/bin/phpunit tests/Schema
+
+      - name: E2E — variants A, B, C and the refusals
+        # An empty E2E_STOP (a push, a pull request) means random: the run prints the one it took.
+        run: php e2e/run.php

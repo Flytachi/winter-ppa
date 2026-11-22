@@ -85,6 +85,13 @@ final class ConstraintAttributesTest extends TestCase
         self::assertSame('priority IN (1, 10)', $struct->expression);
     }
 
+    public function test_check_enum_propagates_name(): void
+    {
+        // It was dropped: the constraint got a hashed name whatever was asked.
+        self::assertSame('chk_tasks_status', (new CheckEnum(StringStatus::class, name: 'chk_tasks_status'))->toObject('status')->name);
+        self::assertNull((new CheckEnum(StringStatus::class))->toObject('status')->name);
+    }
+
     public function test_check_enum_constructor_rejects_non_enum(): void
     {
         $this->expectException(\InvalidArgumentException::class);

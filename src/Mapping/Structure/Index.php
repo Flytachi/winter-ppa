@@ -15,26 +15,28 @@ final class Index implements StructureInterface
         public IndexType $type = IndexType::INDEX,
         public IndexMethod $method = IndexMethod::BTREE,
         public ?string $where = null,
-        public array $includeColumns = [], // New property for PostgreSQL INCLUDE clause
-        public ?string $opClass = null // TODO нужно будет добавить create extention (#[Extension(name: ?'pg_trgm')])
+        public array $includeColumns = [], // PostgreSQL INCLUDE: columns carried by the index, not keyed
+        public ?string $opClass = null // of the first column; its extension is checked by SchemaCheck
     ) {
         if ($name) {
             NameValidator::validate($name);
         }
     }
 
-    public function toSql(string $tableName, string $dialect = 'mysql'): string
+    /**
+     * The index's name: `<table>_<name>_<kind>`, the name being the columns unless one is
+     * given; an index of another method than B-tree has it in the name too
+     * (`orders_note_gin_idx`), so a column may have a B-tree and a GIN index side by side.
+     */
+    public function nameFor(string $tableName, string $dialect = 'mysql'): string
     {
-        $cols = array_values($this->columns);
-        if ($this->opClass !== null) {
-            $cols[0] .= ' ' . $this->opClass;
-        }
-        $columnsSql = ' (' . implode(', ', $cols) . ')';
-
         $baseName = $this->name;
         if (!$baseName) {
             $cleanColumns = array_map(fn($col) => preg_replace('/[^a-zA-Z0-9_]/', '', $col), $this->columns);
             $baseName = implode('_', $cleanColumns);
+            if ($this->method !== IndexMethod::BTREE) {
+                $baseName .= '_' . strtolower($this->method->value);
+            }
         }
 
         $cleanTableName = str_replace(['"', '`'], '', basename(str_replace('.', '/', $tableName)));
@@ -53,14 +55,33 @@ final class Index implements StructureInterface
             $suffix = '_' . hash('crc32b', $nameSql);
             $nameSql = substr($nameSql, 0, $limit - strlen($suffix)) . $suffix;
         }
+        return $nameSql;
+    }
+
+    /**
+     * The statement for a dialect. What a server does not have is left out rather than
+     * written wrong — {@see \Flytachi\Winter\Ppa\Schema\SchemaCheck} says so, or refuses
+     * where leaving it out would change what the index means (a partial unique index):
+     *
+     * - MySQL / MariaDB (InnoDB): B-tree only — no USING; no partial (WHERE), covering
+     *   (INCLUDE) or operator class;
+     * - SQLite: one kind of index — no USING; partial yes, INCLUDE and operator class no;
+     * - PostgreSQL: all of it.
+     */
+    public function toSql(string $tableName, string $dialect = 'mysql'): string
+    {
+        $cols = array_values($this->columns);
+        if ($this->opClass !== null && $dialect === 'pgsql') {
+            $cols[0] .= ' ' . $this->opClass;
+        }
+        $columnsSql = ' (' . implode(', ', $cols) . ')';
+        $nameSql = $this->nameFor($tableName, $dialect);
 
         if ($dialect === 'mysql') {
-            $methodSql = $this->method !== IndexMethod::BTREE ? " USING {$this->method->value}" : '';
-
             return match ($this->type) {
                 IndexType::PRIMARY => "PRIMARY KEY" . $columnsSql,
-                IndexType::UNIQUE => "CREATE UNIQUE INDEX {$nameSql} ON {$tableName}{$methodSql}{$columnsSql}",
-                IndexType::INDEX => "CREATE INDEX {$nameSql} ON {$tableName}{$methodSql}{$columnsSql}",
+                IndexType::UNIQUE => "CREATE UNIQUE INDEX {$nameSql} ON {$tableName}{$columnsSql}",
+                IndexType::INDEX => "CREATE INDEX {$nameSql} ON {$tableName}{$columnsSql}",
             };
         }
 
@@ -81,8 +102,6 @@ final class Index implements StructureInterface
         }
 
         if ($dialect === 'sqlite') {
-            // SQLite has one index implementation, so there is no USING clause; partial
-            // indexes (WHERE) are supported, covering indexes (INCLUDE) are not.
             $whereSql = $this->where ? " WHERE {$this->where}" : '';
 
             return match ($this->type) {

@@ -16,6 +16,7 @@ any of it changes.
 | [02 — Mapping](02-mapping.md) | you add an attribute, a SQL dialect, or change how a property becomes a column |
 | [03 — Repository](03-repository.md) | you touch query assembly, hydration, binds or the CRUD/view traits |
 | [04 — Testing](04-testing.md) | a test needs a real database, or you are about to mock one |
+| [05 — Schema versions](05-schema-versions.md) | you touch `src/Schema/`: snapshots, the diff, applying versions, the drivers' differences |
 
 ## Routes for typical questions
 

@@ -15,6 +15,9 @@ final class Table implements StructureInterface
     /** @var ForeignKey[] */
     public array $foreignKeys;
 
+    /** The entity class the table was mapped from, when it was — for schema snapshots. */
+    public ?string $entity = null;
+
     public function __construct(
         public string $name,
         array $columns,
@@ -124,14 +127,19 @@ final class Table implements StructureInterface
         return $otherConstraints;
     }
 
+    /**
+     * The schema the table lives in, when one has to be made: PostgreSQL only, and never
+     * `public` — it is always there, and asking for it again is an error in the server's
+     * log. IF NOT EXISTS for any other: a second run says nothing either.
+     */
     public function createSchemaIfNotExists(string $dialect = 'mysql'): ?string
     {
-        if (empty($this->schema)) {
+        if (empty($this->schema) || $this->schema === 'public') {
             return null;
         }
 
         return match ($dialect) {
-            'pgsql' => "CREATE SCHEMA {$this->schema};",
+            'pgsql' => "CREATE SCHEMA IF NOT EXISTS {$this->schema};",
             default => null
         };
     }
