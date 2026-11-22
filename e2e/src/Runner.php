@@ -170,6 +170,7 @@ final class Runner
             ['a column gone, no --drop', $last->without('users', 'locale'), '/users\.locale is gone from the entity/'],
             ['a table gone, no --drop', $last->withoutTable('audit_events'), '/audit_events has no entity any more/'],
             ['a table renamed without #[RenamedFrom]', $last->retable('labels', 'tags', null, null), '/public\.labels has no entity any more/'],
+            ['a key on the old name of a renamed table', $last->retable('labels', 'tags', null, "#[RenamedFrom('labels')]")->with('payments', 'label_id', ['#[SmallInteger]', "#[ForeignKey('labels', 'id')]"], '?int $label_id = null'), '/the foreign key fk_payments_label_id points at public\.labels, renamed to public\.tags/'],
             ['#[RenamedFrom] of no table', $last->table('labels', ['attrs' => ["#[RenamedFrom('nope')]"]]), '/`public\.nope` is not a table of the last snapshot/'],
             ['#[RenamedFrom] of a table declared too', $last->table('labels', ['attrs' => ["#[RenamedFrom('users')]"]]), '/`public\.users` is a table of the entities too/'],
             ['a rename without #[RenamedFrom]', $last->renamed('users', 'email', 'mail', ['#[Varchar(160)]', '#[Unique]'], "string \$mail = ''"), '/users\.email is gone from the entity/'],

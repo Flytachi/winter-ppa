@@ -255,6 +255,16 @@ final class SchemaDiffTest extends TestCase
         self::assertSame('@ClientRenamed', $again->stale[0]['property']);
     }
 
+    public function test_a_key_still_on_the_old_name_of_a_renamed_table_is_an_error(): void
+    {
+        $this->record(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class]);
+
+        // orders still declares ForeignKey('customers', …): the table is clients now.
+        $diff = $this->diff(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV3::class]);
+
+        self::assertStringContainsString('the foreign key fk_orders_customer_id points at customers, renamed to clients', implode("\n", $diff->errors));
+    }
+
     public function test_renamed_from_a_table_that_is_not_there_is_an_error(): void
     {
         $this->record(['orders' => F\OrderV1::class]);

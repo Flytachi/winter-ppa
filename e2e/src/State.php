@@ -98,6 +98,12 @@ final readonly class State
         return new self($tables, $this->extensions);
     }
 
+    /** The table's entity and repository under other class names — the table as it is. */
+    public function reclass(string $table, string $class, string $repo): self
+    {
+        return $this->table($table, ['class' => $class, 'repo' => $repo]);
+    }
+
     public function withoutTable(string $table): self
     {
         $tables = $this->tables;

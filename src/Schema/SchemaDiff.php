@@ -182,6 +182,18 @@ final class SchemaDiff
                 $this->changes[] = $change;
                 $this->needed[] = ['entity' => $entity, 'property' => $property];
                 $history = SchemaModel::apply($history, $change);
+                // A key the entities still declare on the old name would be remade on a
+                // table that is no more: said now, not by the server at migrate.
+                foreach ($declared['model'] as $table => $t) {
+                    foreach ($t['constraints'] as $name => $k) {
+                        if ($k['kind'] === 'foreign' && SchemaModel::references($k['sql'], $from, $table)) {
+                            $owner = $declared['entities'][$table] ?? $table;
+                            $this->errors[] = "{$owner}: the foreign key {$name} points at {$from}, renamed to {$to} — "
+                                . "point it at the new name (#[ForeignKey('" . SchemaModel::splitName($to)[1]
+                                . "', …)], or #[ForeignRepo] of its repository).";
+                        }
+                    }
+                }
             } elseif (
                 !isset($history[$from]) && isset($history[$to]) && !$fromDeclared
                 && ($at = self::tableRecordedIn($versions, $from, $to)) !== null

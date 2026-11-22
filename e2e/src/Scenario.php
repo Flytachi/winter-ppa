@@ -313,7 +313,10 @@ final class Scenario
         // columns, its indexes, checks and foreign key named after it).
         $s = $s->with('audit_log', 'source', ['#[Varchar(20)]', "#[DefaultVal(\"'app'\")]"], "string \$source = 'app'")
             ->attrs('payments', 'order_id', fn($a) => self::swap($a, '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', "#[ForeignKey('orders', 'id', onDelete: FKAction::CASCADE, name: 'fk_payments_order')]"))
+            // everything renamed: the table, its entity, its repository — and the key that names it
             ->retable('products', 'goods', 'shop', "#[RenamedFrom('products')]")
+            ->reclass('goods', 'Good', 'GoodRepo')
+            ->attrs('order_items', 'product_id', fn($a) => self::swap($a, "#[ForeignRepo(ProductRepo::class, onDelete: FKAction::CASCADE, name: 'fk_items_product')]", "#[ForeignRepo(GoodRepo::class, onDelete: FKAction::CASCADE, name: 'fk_items_product')]"))
             ->retable('audit_log', 'audit_events', 'shop', "#[RenamedFrom('public.audit_log')]");
         $steps[] = new Step(3, 'tables_renamed', $s, 'two tables renamed, one into another schema, with what is named after them; the kept column dropped at last; a NOT NULL column with a default; a foreign key renamed', drop: ['shop.goods.colour'], expect: ['renameTable' => 2, 'dropColumn' => 1, 'addColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1, 'dropIndex' => 0, 'addIndex' => 0], check: static function (\PDO $db, bool $data): void {
             expect(one($db, "SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_name) FROM information_schema.tables WHERE table_name IN ('products', 'goods', 'audit_log', 'audit_events')") === 'shop.audit_events,shop.goods', 'the tables have their new names');
@@ -336,8 +339,10 @@ final class Scenario
         $s = $s->with('users', 'locale', ['#[Varchar(10)]', "#[Index(['email'], name: 'locale_full', method: IndexMethod::BTREE, where: \"locale <> ''\", opClass: 'varchar_pattern_ops', include: ['id'])]"], "string \$locale = 'en'")
             ->renamed('goods', 'stock', 'quantity', [...$stock, "#[RenamedFrom('stock')]"], 'int $quantity = 0')
             ->without('orders', 'period')
-            ->attrs('labels', 'name', fn($a) => self::swap($a, "#[Unique(method: IndexMethod::BTREE, name: 'label_name')]", null));
-        $steps[] = new Step(3, 'last_mix', $s, 'added with an index of every parameter, renamed with a covering index, dropped with a GiST index, a unique index dropped', drop: ['public.orders.period'], expect: ['addColumn' => 1, 'renameColumn' => 1, 'dropColumn' => 1, 'dropIndex' => 3, 'addIndex' => 2], check: static function (\PDO $db, bool $data): void {
+            ->attrs('labels', 'name', fn($a) => self::swap($a, "#[Unique(method: IndexMethod::BTREE, name: 'label_name')]", null))
+            // the entity and the repository renamed, the table not: nothing for the schema
+            ->reclass('labels', 'Tag', 'TagRepo');
+        $steps[] = new Step(3, 'last_mix', $s, 'added with an index of every parameter, renamed with a covering index, dropped with a GiST index, a unique index dropped; a table\'s classes renamed, the table not', drop: ['public.orders.period'], expect: ['addColumn' => 1, 'renameColumn' => 1, 'dropColumn' => 1, 'dropIndex' => 3, 'addIndex' => 2], check: static function (\PDO $db, bool $data): void {
             expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'goods_stock_cover_idx'"), '(quantity, title) INCLUDE (price, sku)'), 'the covering index is on quantity');
             $full = (string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'users_locale_full_idx'");
             expect(str_contains($full, 'locale varchar_pattern_ops, email) INCLUDE (id) WHERE'), "the index has every part: {$full}");

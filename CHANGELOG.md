@@ -64,7 +64,9 @@ All notable changes to this project are documented here. The format follows
   constraints on PostgreSQL, the rest remade), and on PostgreSQL the primary key, the sequences of
   its identities and the NOT NULL constraints of 18. Foreign keys of other tables pointing at it
   follow it, as the server does. Without the attribute a table renamed is refused, as before — a
-  `--drop` would lose its rows. `snapshot clean` removes it once recorded. SQLite renames, moves to
+  `--drop` would lose its rows. A foreign key the entities still declare on the old name
+  (`#[ForeignKey('clients', …)]`) is refused by the snapshot, with the new name to give it — a
+  `#[ForeignRepo]` follows by itself. `snapshot clean` removes the attribute once recorded. SQLite renames, moves to
   no schema, and remakes its indexes.
 - **`--drop=extension:<name>`** — an extension no longer declared is dropped (`dropExtension`, last in
   its version, without CASCADE); without it, it stays and the snapshot says how to drop it.

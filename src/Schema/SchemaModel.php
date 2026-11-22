@@ -351,6 +351,23 @@ final class SchemaModel
         return $sql;
     }
 
+    /**
+     * Whether a foreign key's statement points at `$table` — by its full name, or by its short
+     * one where a short one finds it: the schema of the table that has the key, or `public`
+     * (the search path PostgreSQL resolves a bare name by), or no schema at all.
+     */
+    public static function references(string $sql, string $table, ?string $fromTable = null): bool
+    {
+        $at = fn(string $t) => '/\bREFERENCES\s+' . preg_quote($t, '/') . '\s*\(/i';
+        if (preg_match($at($table), $sql)) {
+            return true;
+        }
+        [$schema, $short] = self::splitName($table);
+        $own = $fromTable !== null ? self::splitName($fromTable)[0] : $schema;
+        $found = $schema === null || $schema === 'public' || $schema === $own;
+        return $found && (bool) preg_match($at($short), $sql);
+    }
+
     /** `REFERENCES <from>(…)` → `REFERENCES <to>(…)` — and the short name when the schema stays. */
     private static function referencesRenamed(string $sql, string $from, string $to): string
     {
