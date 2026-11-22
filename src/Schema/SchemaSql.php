@@ -41,7 +41,7 @@ final class SchemaSql
             'addColumn'      => ["ALTER TABLE {$t} ADD COLUMN " . self::columnDef($c['column'])],
             'dropColumn'     => ["ALTER TABLE {$t} DROP COLUMN {$c['column']}"],
             'detachColumn'   => [],
-            'renameColumn'   => ["ALTER TABLE {$t} RENAME COLUMN {$c['from']} TO {$c['to']}"],
+            'renameColumn'   => self::renameColumn($t, $c['from'], $c['to'], $driver),
             'alterColumn'    => self::alterColumn($t, $c['from'], $c['to'], $driver),
             'addIndex'       => [$c['sql']],
             'dropIndex'      => [self::dropIndex($t, $c['name'], $driver)],
@@ -192,6 +192,31 @@ final class SchemaSql
     }
 
     /** @return list<string> */
+    /**
+     * PostgreSQL 18 keeps NOT NULL as a constraint named after its column
+     * (`orders_user_id_not_null`) and does not rename it with the column: renamed here, when
+     * it is there — on 16 and before there is none, and the step does nothing — so that an
+     * upgraded database and a fresh one name it alike.
+     *
+     * @return list<string>
+     */
+    private static function renameColumn(string $t, string $from, string $to, string $driver): array
+    {
+        $sql = ["ALTER TABLE {$t} RENAME COLUMN {$from} TO {$to}"];
+        if ($driver !== 'pgsql') {
+            return $sql;
+        }
+        $rel = substr($t, (int) strrpos('.' . $t, '.'));
+        $old = "{$rel}_{$from}_not_null";
+        $new = "{$rel}_{$to}_not_null";
+        if (strlen($old) > 63 || strlen($new) > 63) {
+            return $sql;            // names the server shortened its own way: left as they are
+        }
+        $sql[] = "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = '{$t}'::regclass"
+            . " AND conname = '{$old}') THEN ALTER TABLE {$t} RENAME CONSTRAINT {$old} TO {$new}; END IF; END \$\$";
+        return $sql;
+    }
+
     private static function addConstraint(string $t, array $c, string $driver): array
     {
         // Not by the SQLite of the machine a version is recorded on: a version is applied by

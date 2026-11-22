@@ -72,6 +72,10 @@ All notable changes to this project are documented here. The format follows
   foreign key: a custom version rebuilds the table (`"by": "code"`); a table the version creates
   still gets it inside its CREATE TABLE. And the check after a version now compares SQLite's
   constraints too (by name, from its CREATE TABLE): a rebuild that forgot one fails the version.
+- **PostgreSQL 18: a renamed column kept its NOT NULL constraint's old name** — 18 keeps NOT NULL as
+  a constraint named after the column (`orders_user_id_not_null`) and does not rename it with the
+  column, so an upgraded database and a fresh one differed. The rename now renames it too, when it
+  is there; on 16 and before there is none and the step does nothing.
 - **A PostgreSQL array column (`#[Type('TEXT[]')]`) failed the check after its version**: the
   server names it `_text`, the model `TEXT[]` — "expected text[], found _text". One spelling now.
 - **The same version code met twice in a process was a fatal "cannot redeclare class"** — a
