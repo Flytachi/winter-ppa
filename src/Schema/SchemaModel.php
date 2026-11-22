@@ -162,7 +162,7 @@ final class SchemaModel
     public static function apply(array $model, array $change): array
     {
         $op = $change['op'] ?? '';
-        if ($op === 'createSchema' || $op === 'createExtension') {
+        if ($op === 'createSchema' || $op === 'createExtension' || $op === 'dropExtension') {
             return $model;          // not a table: see objects()
         }
         $t = $change['table'] ?? null;
@@ -270,6 +270,8 @@ final class SchemaModel
                     $schemas[$c['name']] = $c['name'];
                 } elseif (($c['op'] ?? '') === 'createExtension') {
                     $extensions[$c['name']] = $c['sql'];
+                } elseif (($c['op'] ?? '') === 'dropExtension') {
+                    unset($extensions[$c['name']]);
                 }
             }
         }

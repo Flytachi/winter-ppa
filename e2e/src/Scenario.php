@@ -10,9 +10,12 @@ namespace Flytachi\Winter\Ppa\E2e;
  * Stage 1 (V001–V005): six tables with every attribute, then a column added, renamed,
  * dropped — and back to the first shape in one version.
  * Stage 2: data ({@see Data}).
- * Stage 3 (V006–V022): every index and foreign key remade, types widened and narrowed,
- * NOT NULL over NULLs, a unique index over duplicates, a primary key changed, tables made
- * and dropped, code-only versions — on tables full of rows.
+ * Stage 3 (V006–V022), on tables full of rows: every parameter of every index, foreign key,
+ * check and id attribute made, changed, renamed, moved and dropped; extensions added (with
+ * version, schema, cascade) and dropped; types widened and narrowed; NOT NULL over NULLs; a
+ * unique index over duplicates; a primary key changed; tables made and dropped; code-only
+ * versions. {@see Runner::coverage()} fails the run when a parameter, an FKAction or an
+ * IndexMethod is used by no state.
  *
  * A check gets the database and whether it holds the data of stage 2 (variant B has none).
  */
@@ -71,24 +74,41 @@ final class Scenario
         // ── Stage 3 ─────────────────────────────────────────────────────────
         $s = self::clean($s);
 
+        // V006 — indexes: WHERE changed, a named index renamed, INCLUDE on a unique one, a
+        // composite unique index with a name.
         $s = $s->attrs('users', 'status', fn($a) => self::swap($a, "#[Index(where: \"status <> 'deleted'\")]", "#[Index(where: \"status IN ('active', 'new')\")]"))
-            ->attrs('orders', 'paid', fn($a) => self::swap($a, "#[Index(where: 'paid = false', name: 'unpaid')]", "#[Index(where: 'paid = false AND total > 0', name: 'unpaid')]"));
-        $steps[] = new Step(3, 'partial_indexes', $s, 'the WHERE of two partial indexes changed: dropped and made again', expect: ['dropIndex' => 2, 'addIndex' => 2], check: static function (\PDO $db): void {
+            ->attrs('orders', 'paid', fn($a) => self::swap($a, "#[Index(where: 'paid = false', name: 'unpaid')]", "#[Index(where: 'paid = false AND total > 0', name: 'unpaid')]"))
+            ->attrs('audit_log', 'event', fn($a) => self::swap($a, "#[Index(method: IndexMethod::BTREE, name: 'event_btree')]", "#[Index(method: IndexMethod::BTREE, name: 'audit_event')]"))
+            ->attrs('users', 'email', fn($a) => self::swap($a, '#[Unique]', "#[Unique(include: ['name'])]"))
+            ->attrs('orders', 'number', fn($a) => [...$a, "#[Unique(['placed_at'], name: 'number_day')]"]);
+        $steps[] = new Step(3, 'indexes_remade', $s, 'WHERE changed on two, a named index renamed, INCLUDE on a unique one, a composite unique one', expect: ['dropIndex' => 4, 'addIndex' => 5], check: static function (\PDO $db): void {
             expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'orders_unpaid_idx'"), 'total > '), 'orders_unpaid_idx has its new WHERE');
+            expect(one($db, "SELECT count(*) FROM pg_indexes WHERE indexname IN ('audit_log_audit_event_idx', 'orders_number_day_udx')") == 2, 'the renamed and the composite index are there');
+            expect(one($db, "SELECT count(*) FROM pg_indexes WHERE indexname = 'audit_log_event_btree_idx'") == 0, 'the old name is gone');
+            expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'users_email_udx'"), 'INCLUDE (name)'), 'the unique index covers name');
         });
 
+        // V007 — index methods and extensions: HASH → GIN with trigrams, btree_gist and a GiST
+        // index, an extension with version, schema and cascade, a unique index with an
+        // operator class.
         $s = $s->withExtension('btree_gist')
+            ->withExtension('uuid-ossp', "'uuid-ossp', version: '1.1', schema: 'shop', cascade: true")
             ->attrs('products', 'title', fn($a) => self::swap($a, '#[Index(method: IndexMethod::HASH)]', "#[Index(method: IndexMethod::GIN, opClass: 'gin_trgm_ops')]"))
-            ->attrs('audit_log', 'level', fn($a) => [...$a, '#[Index(method: IndexMethod::GIST)]']);
-        $steps[] = new Step(3, 'index_methods', $s, 'HASH → GIN with trigrams; btree_gist and a GiST index on an integer', expect: ['createExtension' => 1, 'dropIndex' => 1, 'addIndex' => 2], check: static function (\PDO $db, bool $data): void {
+            ->attrs('audit_log', 'level', fn($a) => [...$a, '#[Index(method: IndexMethod::GIST)]'])
+            ->attrs('users', 'email', fn($a) => self::swap($a, "#[Unique(include: ['name'])]", "#[Unique(include: ['name'], opClass: 'varchar_pattern_ops')]"));
+        $steps[] = new Step(3, 'index_methods_and_extensions', $s, 'HASH → GIN with trigrams, two extensions (one with version, schema, cascade), a GiST index, a unique one with an operator class', expect: ['createExtension' => 2, 'dropIndex' => 2, 'addIndex' => 3], check: static function (\PDO $db, bool $data): void {
             expect(one($db, "SELECT count(*) FROM pg_extension WHERE extname = 'btree_gist'") == 1, 'btree_gist is there');
+            expect(one($db, "SELECT n.nspname || ' ' || e.extversion FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE extname = 'uuid-ossp'") === 'shop 1.1', 'uuid-ossp 1.1 in shop');
+            expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'users_email_udx'"), 'varchar_pattern_ops'), 'the unique index has its operator class');
             if ($data) {
                 expect(one($db, "SELECT count(*) FROM shop.products WHERE title % 'Product 1'") > 0, 'the trigram index answers');
             }
         });
 
-        $s = $s->attrs('users', 'name', fn($a) => [...$a, '#[Unique]']);
-        $steps[] = new Step(3, 'unique_over_duplicates', $s, 'a unique index on a column with duplicates: before() makes them distinct', custom: true, expect: ['addIndex' => 1],
+        // V008 — a unique index over duplicates (before() makes them distinct), and a composite
+        // one with a name and an explicit method.
+        $s = $s->attrs('users', 'name', fn($a) => [...$a, '#[Unique]', "#[Unique(['age'], name: 'name_age', method: IndexMethod::BTREE)]"]);
+        $steps[] = new Step(3, 'unique_over_duplicates', $s, 'unique indexes on a column with duplicates: before() makes them distinct', custom: true, expect: ['addIndex' => 2],
             before: "\$db->exec(\"UPDATE public.users u SET name = u.name || ' #' || u.id WHERE u.id NOT IN (SELECT min(id) FROM public.users GROUP BY name)\");",
             check: static function (\PDO $db, bool $data): void {
                 if ($data) {
@@ -97,106 +117,187 @@ final class Scenario
                 }
             });
 
+        // V009 — INCLUDE widened, a GIN index dropped, a composite index added, a named index
+        // moved to another column.
         $s = $s->attrs('products', 'stock', fn($a) => self::swap($a, "#[Index(['title'], include: ['price'], name: 'stock_cover')]", "#[Index(['title'], include: ['price', 'sku'], name: 'stock_cover')]"))
             ->attrs('users', 'profile', fn($a) => self::swap($a, '#[Index(method: IndexMethod::GIN)]', null))
-            ->attrs('orders', 'user_id', fn($a) => [...$a, "#[Index(['placed_at'])]"]);
-        $steps[] = new Step(3, 'composite_and_covering', $s, 'INCLUDE widened, a GIN index dropped, a composite index added', expect: ['dropIndex' => 2, 'addIndex' => 2]);
-
-        $s = $s->attrs('orders', 'user_id', fn($a) => self::swap($a, "#[ForeignKey('users', 'id', onUpdate: FKAction::CASCADE, onDelete: FKAction::CASCADE)]", "#[ForeignKey('users', 'id', onUpdate: FKAction::CASCADE, onDelete: FKAction::RESTRICT)]"))
-            ->attrs('order_items', 'product_id', fn($a) => self::swap($a, "#[ForeignRepo(ProductRepo::class, onDelete: FKAction::RESTRICT, name: 'fk_items_product')]", "#[ForeignRepo(ProductRepo::class, onDelete: FKAction::CASCADE, name: 'fk_items_product')]"));
-        $steps[] = new Step(3, 'foreign_key_actions', $s, 'ON DELETE of two foreign keys changed', expect: ['dropConstraint' => 2, 'addConstraint' => 2], check: static function (\PDO $db): void {
-            expect(str_contains((string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'fk_items_product'"), 'ON DELETE CASCADE'), 'fk_items_product cascades');
+            ->attrs('orders', 'user_id', fn($a) => [...$a, "#[Index(['placed_at'])]"])
+            ->attrs('audit_log', 'event', fn($a) => self::swap($a, "#[Index(method: IndexMethod::BTREE, name: 'audit_event')]", null))
+            ->attrs('audit_log', 'user_ref', fn($a) => [...$a, "#[Index(method: IndexMethod::BTREE, name: 'audit_event')]"]);
+        $steps[] = new Step(3, 'indexes_moved', $s, 'INCLUDE widened, a GIN index dropped, a composite one added, a named one moved to another column', expect: ['dropIndex' => 3, 'addIndex' => 3], check: static function (\PDO $db): void {
+            expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'audit_log_audit_event_idx'"), '(user_ref)'), 'audit_event is on user_ref now');
         });
 
+        // V010 — foreign keys: every action, a key renamed by its name.
+        $s = $s->attrs('orders', 'user_id', fn($a) => self::swap($a, "#[ForeignKey('users', 'id', onUpdate: FKAction::CASCADE, onDelete: FKAction::CASCADE)]", "#[ForeignKey('users', 'id', onUpdate: FKAction::NO_ACTION, onDelete: FKAction::RESTRICT, name: 'fk_orders_user')]"))
+            ->attrs('order_items', 'order_id', fn($a) => self::swap($a, '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', '#[ForeignRepo(OrderRepo::class, onUpdate: FKAction::CASCADE, onDelete: FKAction::CASCADE)]'))
+            ->attrs('order_items', 'product_id', fn($a) => self::swap($a, "#[ForeignRepo(ProductRepo::class, onDelete: FKAction::RESTRICT, name: 'fk_items_product')]", "#[ForeignRepo(ProductRepo::class, onDelete: FKAction::CASCADE, name: 'fk_items_product')]"));
+        $steps[] = new Step(3, 'foreign_key_actions', $s, 'ON UPDATE / ON DELETE changed on three keys, one renamed by its name', expect: ['dropConstraint' => 3, 'addConstraint' => 3], check: static function (\PDO $db, bool $data): void {
+            $def = fn(string $name) => (string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = '{$name}'");
+            expect(str_contains($def('fk_items_product'), 'ON DELETE CASCADE'), 'fk_items_product cascades');
+            expect(str_contains($def('fk_order_items_order_id'), 'ON UPDATE CASCADE ON DELETE CASCADE'), 'the items follow their order');
+            expect($def('fk_orders_user') !== '' && $def('fk_orders_user_id') === '', 'fk_orders_user_id is now fk_orders_user');
+            if ($data) {
+                // What the keys do, then undone: no row of the test is lost.
+                $db->beginTransaction();
+                $product = one($db, 'SELECT id FROM shop.products ORDER BY sku LIMIT 1');
+                $items = (int) one($db, "SELECT count(*) FROM public.order_items WHERE product_id = '{$product}'");
+                $db->exec("DELETE FROM shop.products WHERE id = '{$product}'");
+                expect($items > 0 && one($db, 'SELECT count(*) FROM public.order_items') == Data::ITEMS - $items, 'deleting a product deletes its items');
+                $db->rollBack();
+                $db->beginTransaction();
+                try {
+                    $db->exec('DELETE FROM public.users WHERE id = 1');
+                    $restricted = false;
+                } catch (\PDOException) {
+                    $restricted = true;
+                }
+                $db->rollBack();
+                expect($restricted, 'a user with orders cannot be deleted (RESTRICT)');
+            }
+        });
+
+        // V011 — a foreign key dropped; one added over rows that point nowhere (before() clears
+        // them), with SET DEFAULT and SET NULL.
         $s = $s->attrs('users', 'group_id', fn($a) => self::swap($a, '#[ForeignRepo(GroupRepo::class, onDelete: FKAction::SET_NULL)]', null))
-            ->attrs('audit_log', 'user_ref', fn($a) => [...$a, '#[ForeignRepo(UserRepo::class, onDelete: FKAction::SET_NULL)]']);
+            ->attrs('audit_log', 'user_ref', fn($a) => [...$a, '#[ForeignRepo(UserRepo::class, onUpdate: FKAction::SET_DEFAULT, onDelete: FKAction::SET_NULL)]']);
         $steps[] = new Step(3, 'foreign_key_over_orphans', $s, 'a foreign key dropped, one added over rows that point nowhere: before() clears them', custom: true, expect: ['dropConstraint' => 1, 'addConstraint' => 1],
             before: "\$db->exec('UPDATE public.audit_log SET user_ref = NULL WHERE user_ref IS NOT NULL AND user_ref NOT IN (SELECT id FROM public.users)');",
             check: static function (\PDO $db, bool $data): void {
+                expect(str_contains((string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'fk_audit_log_user_ref'"), 'ON UPDATE SET DEFAULT ON DELETE SET NULL'), 'the key has its actions');
                 if ($data) {
                     expect(one($db, 'SELECT count(*) FROM public.audit_log WHERE user_ref IS NOT NULL') == Data::AUDIT_VALID_REFS, 'the valid references stay');
                 }
             });
 
+        // V012 — widened by the kernel: VARCHAR, DECIMAL, an integer, an identity (SMALLINT → INT).
         $s = $s->attrs('users', 'name', fn($a) => self::swap($a, '#[Varchar(120)]', '#[Varchar(200)]'))
             ->attrs('orders', 'total', fn($a) => self::swap($a, '#[Decimal(12, 2)]', '#[Decimal(14, 2)]'))
-            ->attrs('audit_log', 'level', fn($a) => self::swap($a, '#[SmallInteger]', '#[Integer]'));
-        $steps[] = new Step(3, 'widen_types', $s, 'VARCHAR, DECIMAL and an integer widened, by the kernel', expect: ['alterColumn' => 3], check: static function (\PDO $db, bool $data): void {
+            ->attrs('audit_log', 'level', fn($a) => self::swap($a, '#[SmallInteger]', '#[Integer]'))
+            ->attrs('groups', 'id', fn($a) => self::swap($a, '#[SmallId]', '#[Id]'));
+        $steps[] = new Step(3, 'widen_types', $s, 'VARCHAR, DECIMAL, an integer and an identity widened, by the kernel', expect: ['alterColumn' => 4], check: static function (\PDO $db, bool $data): void {
             expect(one($db, "SELECT character_maximum_length FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'name'") == 200, 'users.name is VARCHAR(200)');
+            expect(one($db, "SELECT data_type || ' ' || is_identity FROM information_schema.columns WHERE table_name = 'groups' AND column_name = 'id'") === 'integer YES', 'groups.id is an INT identity');
             if ($data) {
                 expect(one($db, 'SELECT sum(total) FROM public.orders') == Data::ORDERS_TOTAL, 'the totals are untouched');
+                expect(one($db, 'SELECT count(*) FROM public.groups') == Data::GROUPS, 'the groups are there');
             }
         });
 
-        $s = $s->attrs('products', 'sku', fn($a) => self::swap($a, '#[Char(12)]', '#[Varchar(10)]'));
-        $steps[] = new Step(3, 'narrow_sku', $s, 'CHAR(12) → VARCHAR(10): a narrowing, made by after()', custom: true, expect: ['alterColumn' => 1],
+        // V013 — a narrowing by after(), and a check's expression changed.
+        $s = $s->attrs('products', 'sku', fn($a) => self::swap($a, '#[Char(12)]', '#[Varchar(10)]'))
+            ->attrs('products', 'price', fn($a) => self::swap($a, "#[Check('price >= 0', name: 'chk_products_price')]", "#[Check('price >= 0 AND price < 1000000', name: 'chk_products_price')]"));
+        $steps[] = new Step(3, 'narrow_sku', $s, 'CHAR(12) → VARCHAR(10) by after(); a check made stricter', custom: true, expect: ['alterColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1],
             after: "\$db->exec('ALTER TABLE shop.products ALTER COLUMN sku TYPE VARCHAR(10) USING left(rtrim(sku), 10)');",
             check: static function (\PDO $db, bool $data): void {
+                expect(str_contains((string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_products_price'"), '1000000'), 'the check is the new one');
                 if ($data) {
                     expect(one($db, 'SELECT count(DISTINCT sku) FROM shop.products') == Data::PRODUCTS, 'every sku is still distinct');
-                    expect(one($db, "SELECT sku FROM shop.products ORDER BY sku LIMIT 1") === 'SKU-000001', 'the sku keeps its value, without the padding');
+                    expect(one($db, 'SELECT sku FROM shop.products ORDER BY sku LIMIT 1') === 'SKU-000001', 'the sku keeps its value, without the padding');
                 }
             });
 
-        $s = $s->with('orders', 'note', ['#[Text]', "#[DefaultVal(\"''\")]"], "string \$note = ''");
-        $steps[] = new Step(3, 'note_required', $s, 'NOT NULL over NULLs: before() fills them', custom: true, expect: ['alterColumn' => 1],
+        // V014 — NOT NULL over NULLs (before() fills them), and #[NullableIs(false)] on a
+        // nullable property.
+        $s = $s->with('orders', 'note', ['#[Text]', "#[DefaultVal(\"''\")]"], "string \$note = ''")
+            ->attrs('users', 'rating', fn($a) => [...$a, '#[NullableIs(false)]', "#[DefaultVal('0')]"]);
+        $steps[] = new Step(3, 'not_null', $s, 'NOT NULL over NULLs: before() fills them; #[NullableIs(false)] on a ?float', custom: true, expect: ['alterColumn' => 2],
             before: "\$db->exec(\"UPDATE public.orders SET note = '' WHERE note IS NULL\");",
             check: static function (\PDO $db, bool $data): void {
-                expect(one($db, "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'note'") === 'NO', 'orders.note is NOT NULL');
+                expect(one($db, "SELECT string_agg(is_nullable, ',' ORDER BY column_name) FROM information_schema.columns WHERE (table_name, column_name) IN (('orders', 'note'), ('users', 'rating'))") === 'NO,NO', 'orders.note and users.rating are NOT NULL');
                 if ($data) {
                     expect(one($db, "SELECT count(*) FROM public.orders WHERE note = ''") == Data::ORDERS_WITHOUT_NOTE, 'the empty notes are filled');
                 }
             });
 
+        // V015 — checks: an enum's widened, an int enum's added, one dropped, a table-level
+        // one renamed; a default changed.
         $s = $s->attrs('users', 'status', fn($a) => self::swap(
             self::swap($a, "#[CheckEnum(UserStatus::class, name: 'chk_users_status')]", "#[CheckEnum(UserStatusV2::class, name: 'chk_users_status')]"),
             "#[DefaultVal(\"'active'\")]",
             "#[DefaultVal(\"'new'\")]",
-        ))->decl('users', 'status', "string \$status = 'new'");
-        $steps[] = new Step(3, 'status_blocked', $s, 'the CHECK of an enum widened, a default changed', expect: ['dropConstraint' => 1, 'addConstraint' => 1, 'alterColumn' => 1], check: static function (\PDO $db): void {
-            $db->exec("INSERT INTO public.users (email, name, status) VALUES ('blocked@e2e.test', 'Blocked', 'blocked')");
+        ))->decl('users', 'status', "string \$status = 'new'")
+            ->attrs('audit_log', 'level', fn($a) => [...$a, '#[CheckEnum(AuditLevel::class)]'])
+            ->attrs('users', 'age', fn($a) => self::swap($a, "#[Check('age >= 0')]", null))
+            ->table('orders', ['attrs' => ["#[Check('total >= 0', name: 'chk_orders_total_positive')]"]]);
+        $steps[] = new Step(3, 'checks', $s, 'a CHECK of a string enum widened, one of an int enum added, one dropped, a table-level one renamed', expect: ['dropConstraint' => 3, 'addConstraint' => 3, 'alterColumn' => 1], check: static function (\PDO $db): void {
+            $refused = static function (\PDO $db, string $sql): bool {
+                $db->beginTransaction();
+                try {
+                    $db->exec($sql);
+                    return false;
+                } catch (\PDOException) {
+                    return true;
+                } finally {
+                    $db->rollBack();
+                }
+            };
+            expect(!$refused($db, "INSERT INTO public.users (email, name, status) VALUES ('blocked@e2e.test', 'Blocked', 'blocked')"), 'blocked is a status now');
+            expect($refused($db, "INSERT INTO public.audit_log (event, level) VALUES ('x', 7)"), 'level 7 is no AuditLevel');
+            expect(!$refused($db, "INSERT INTO public.users (email, name, age) VALUES ('old@e2e.test', 'Old', -1)"), 'the age check is gone');
+            expect(one($db, "SELECT count(*) FROM pg_constraint WHERE conname IN ('chk_orders_total', 'chk_orders_total_positive')") == 1, 'the table check is renamed');
             expect(one($db, "SELECT column_default FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'status'") === "'new'::character varying", 'the default is new');
-            $db->exec("DELETE FROM public.users WHERE email = 'blocked@e2e.test'");
         });
 
+        // V016 — a column renamed with its foreign key and its composite index.
         $userId = $s->tables['orders']['props']['user_id'][0];
         $s = $s->renamed('orders', 'user_id', 'customer_id', [...$userId, "#[RenamedFrom('user_id')]"], 'int $customer_id');
         $steps[] = new Step(3, 'rename_with_key', $s, 'a column with a foreign key and a composite index renamed', expect: ['renameColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1, 'dropIndex' => 1, 'addIndex' => 1], check: static function (\PDO $db, bool $data): void {
-            expect(one($db, "SELECT count(*) FROM pg_constraint WHERE conname = 'fk_orders_customer_id'") == 1, 'the foreign key follows the column');
+            expect(str_contains((string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'fk_orders_user'"), 'FOREIGN KEY (customer_id)'), 'the foreign key follows the column');
             if ($data) {
                 expect(one($db, 'SELECT sum(customer_id) FROM public.orders') == Data::ORDERS_USER_SUM, 'every order keeps its customer');
             }
         });
 
+        // V017 — two new tables (identities always generated), filled by after().
         $s = self::clean($s)->table('payments', [
-            'class' => 'Payment', 'repo' => 'PaymentRepo', 'schema' => 'shop', 'attrs' => [],
+            'class' => 'Payment', 'repo' => 'PaymentRepo', 'schema' => 'shop', 'attrs' => ["#[Check('amount >= 0', name: 'chk_payments_amount')]"],
             'props' => [
-                'id' => [['#[Id]'], '?int $id = null'],
-                'order_id' => [['#[BigInteger]', '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]'], 'int $order_id'],
+                'id' => [['#[Id(always: true)]'], '?int $id = null'],
+                'order_id' => [['#[BigInteger]', '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', "#[Unique(['paid_at'], name: 'order_paid')]"], 'int $order_id'],
                 'amount' => [['#[Decimal(14, 2)]'], "string \$amount = '0'"],
                 'paid_at' => [['#[Timestamp]', "#[DefaultVal('CURRENT_TIMESTAMP')]"], "string \$paid_at = ''"],
             ],
+        ])->table('labels', [
+            'class' => 'Label', 'repo' => 'LabelRepo', 'schema' => null, 'attrs' => [],
+            'props' => [
+                'id' => [['#[SmallId(always: true)]'], '?int $id = null'],
+                'name' => [['#[Varchar(40)]', "#[Unique(method: IndexMethod::BTREE, name: 'label_name')]"], "string \$name = ''"],
+            ],
         ]);
-        $steps[] = new Step(3, 'payments', $s, 'a new table, filled by after() from the paid orders', custom: true, expect: ['createTable' => 1, 'addConstraint' => 1],
-            after: "\$db->exec('INSERT INTO shop.payments (order_id, amount, paid_at) SELECT id, total, placed_at FROM public.orders WHERE paid');",
+        $steps[] = new Step(3, 'new_tables', $s, 'two new tables with identities always generated, filled by after()', custom: true, expect: ['createTable' => 2, 'addConstraint' => 2, 'addIndex' => 2],
+            after: "\$db->exec('INSERT INTO shop.payments (order_id, amount, paid_at) SELECT id, total, placed_at FROM public.orders WHERE paid'); \$db->exec(\"INSERT INTO public.labels (name) VALUES ('red'), ('green'), ('blue')\");",
             check: static function (\PDO $db, bool $data): void {
+                expect(one($db, "SELECT string_agg(identity_generation, ',' ORDER BY table_name) FROM information_schema.columns WHERE table_name IN ('labels', 'payments') AND column_name = 'id'") === 'ALWAYS,ALWAYS', 'both ids are GENERATED ALWAYS');
                 if ($data) {
                     expect(one($db, 'SELECT count(*) FROM shop.payments') == Data::ORDERS_PAID, 'a payment per paid order');
+                    expect(one($db, 'SELECT count(*) FROM public.labels') == 3, 'three labels');
                 }
             });
 
-        $s = $s->attrs('audit_log', 'happened', fn($a) => [...$a, '#[Primary]']);
-        $steps[] = new Step(3, 'audit_key', $s, 'the primary key (id) → (id, happened): by after()', custom: true, expect: ['setPrimaryKey' => 1],
+        // V018 — ids: the primary key (id) → (id, happened) by after(); GENERATED ALWAYS on and
+        // off, by the kernel.
+        $s = $s->attrs('audit_log', 'happened', fn($a) => [...$a, '#[Primary]'])
+            ->attrs('audit_log', 'id', fn($a) => self::swap($a, '#[AutoIncrement]', '#[AutoIncrement(always: true)]'))
+            ->attrs('orders', 'id', fn($a) => self::swap($a, '#[BigId(always: true)]', '#[BigId]'));
+        $steps[] = new Step(3, 'ids', $s, 'a primary key of two columns (by after()), GENERATED ALWAYS turned on and off (by the kernel)', custom: true, expect: ['setPrimaryKey' => 1, 'alterColumn' => 2],
             after: "\$db->exec('ALTER TABLE public.audit_log DROP CONSTRAINT audit_log_pkey, ADD PRIMARY KEY (id, happened)');",
             check: static function (\PDO $db): void {
                 expect(one($db, "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relname = 'audit_log' AND i.indisprimary AND i.indnatts = 2") == 1, 'audit_log has a key of two columns');
+                expect(one($db, "SELECT string_agg(table_name || ' ' || identity_generation, ',' ORDER BY table_name) FROM information_schema.columns WHERE table_name IN ('audit_log', 'orders') AND column_name = 'id'") === 'audit_log ALWAYS,orders BY DEFAULT', 'the identities are switched');
             });
 
-        $s = $s->withoutTable('groups')->without('products', 'weight');
-        $steps[] = new Step(3, 'drop_groups', $s, 'a table dropped, and a column', drop: ['public.groups', 'shop.products.weight'], expect: ['dropTable' => 1, 'dropColumn' => 1], check: static function (\PDO $db): void {
+        // V019 — dropped: a table, a column, an index, an extension (--drop=extension:…).
+        $s = $s->withoutTable('groups')->without('products', 'weight')
+            ->attrs('products', 'title', fn($a) => self::swap($a, '#[Index]', null))
+            ->withoutExtension('uuid-ossp');
+        $steps[] = new Step(3, 'drops', $s, 'a table, a column, an index and an extension dropped', drop: ['public.groups', 'shop.products.weight', 'extension:uuid-ossp'], expect: ['dropTable' => 1, 'dropColumn' => 1, 'dropIndex' => 1, 'dropExtension' => 1], check: static function (\PDO $db): void {
             expect(one($db, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'groups'") == 0, 'groups is gone');
+            expect(one($db, "SELECT count(*) FROM pg_extension WHERE extname = 'uuid-ossp'") == 0, 'uuid-ossp is gone');
+            expect(one($db, "SELECT count(*) FROM pg_indexes WHERE indexname = 'products_title_idx'") == 0, 'the plain title index is gone');
         });
 
+        // V020 — a version of code only.
         $steps[] = new Step(3, 'recount_totals', $s, 'a version of code only: totals recounted from the items', custom: true,
             after: "\$db->exec('UPDATE public.orders o SET total = (SELECT coalesce(sum(qty * price), 0) FROM public.order_items i WHERE i.order_id = o.id)');",
             check: static function (\PDO $db, bool $data): void {
@@ -205,20 +306,30 @@ final class Scenario
                 }
             });
 
-        $s = $s->with('audit_log', 'source', ['#[Varchar(20)]', "#[DefaultVal(\"'app'\")]"], "string \$source = 'app'");
-        $steps[] = new Step(3, 'colour_gone', $s, 'the column kept by --keep dropped at last; a NOT NULL column with a default added', drop: ['shop.products.colour'], expect: ['dropColumn' => 1, 'addColumn' => 1], check: static function (\PDO $db, bool $data): void {
+        // V021 — the kept column dropped at last; a NOT NULL column with a default added; a
+        // foreign key of a repository made a named key of a table.
+        $s = $s->with('audit_log', 'source', ['#[Varchar(20)]', "#[DefaultVal(\"'app'\")]"], "string \$source = 'app'")
+            ->attrs('payments', 'order_id', fn($a) => self::swap($a, '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', "#[ForeignKey('orders', 'id', onDelete: FKAction::CASCADE, name: 'fk_payments_order')]"));
+        $steps[] = new Step(3, 'colour_gone', $s, 'the column kept by --keep dropped at last; a NOT NULL column with a default; a foreign key renamed', drop: ['shop.products.colour'], expect: ['dropColumn' => 1, 'addColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1], check: static function (\PDO $db, bool $data): void {
             expect(one($db, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'colour'") == 0, 'colour is gone');
+            expect(one($db, "SELECT count(*) FROM pg_constraint WHERE conname = 'fk_payments_order'") == 1, 'the payments key has its name');
             if ($data) {
                 expect(one($db, "SELECT count(*) FROM public.audit_log WHERE source = 'app'") == Data::AUDIT, 'every old row has the default');
+                expect(one($db, 'SELECT count(*) FROM shop.payments') == Data::ORDERS_PAID, 'no payment lost with its key');
             }
         });
 
+        // V022 — at once: added (with an index of every parameter), renamed (with a covering
+        // index on it), dropped (with a GiST index on it), a unique index dropped.
         $stock = $s->tables['products']['props']['stock'][0];
-        $s = $s->with('users', 'locale', ['#[Varchar(10)]'], "string \$locale = 'en'")
+        $s = $s->with('users', 'locale', ['#[Varchar(10)]', "#[Index(['email'], name: 'locale_full', method: IndexMethod::BTREE, where: \"locale <> ''\", opClass: 'varchar_pattern_ops', include: ['id'])]"], "string \$locale = 'en'")
             ->renamed('products', 'stock', 'quantity', [...$stock, "#[RenamedFrom('stock')]"], 'int $quantity = 0')
-            ->without('orders', 'period');
-        $steps[] = new Step(3, 'last_mix', $s, 'added, renamed (with a covering index on it) and dropped (with a GiST index on it) at once', drop: ['public.orders.period'], expect: ['addColumn' => 1, 'renameColumn' => 1, 'dropColumn' => 1], check: static function (\PDO $db, bool $data): void {
+            ->without('orders', 'period')
+            ->attrs('labels', 'name', fn($a) => self::swap($a, "#[Unique(method: IndexMethod::BTREE, name: 'label_name')]", null));
+        $steps[] = new Step(3, 'last_mix', $s, 'added with an index of every parameter, renamed with a covering index, dropped with a GiST index, a unique index dropped', drop: ['public.orders.period'], expect: ['addColumn' => 1, 'renameColumn' => 1, 'dropColumn' => 1, 'dropIndex' => 3, 'addIndex' => 2], check: static function (\PDO $db, bool $data): void {
             expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'products_stock_cover_idx'"), '(quantity, title) INCLUDE (price, sku)'), 'the covering index is on quantity');
+            $full = (string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'users_locale_full_idx'");
+            expect(str_contains($full, 'locale varchar_pattern_ops, email) INCLUDE (id) WHERE'), "the index has every part: {$full}");
             if ($data) {
                 expect(one($db, 'SELECT sum(quantity) FROM shop.products') == Data::STOCK_SUM, 'the stock is in quantity');
             }
@@ -242,6 +353,7 @@ final class Scenario
                 'id' => [['#[BigId]'], '?int $id = null'],
                 'email' => [['#[Varchar(160)]', '#[Unique]'], "string \$email = ''"],
                 'name' => [['#[Varchar(120)]', "#[Index(method: IndexMethod::GIN, opClass: 'gin_trgm_ops')]"], "string \$name = ''"],
+                'nickname' => [['#[Varchar(30)]', '#[NullableIs(false)]', "#[DefaultVal(\"''\")]"], '?string $nickname = null'],
                 'group_id' => [['#[SmallInteger]', '#[ForeignRepo(GroupRepo::class, onDelete: FKAction::SET_NULL)]'], '?int $group_id = null'],
                 'age' => [['#[SmallInteger]', "#[Check('age >= 0')]", "#[DefaultVal('0')]"], 'int $age = 0'],
                 'status' => [['#[Varchar(20)]', "#[DefaultVal(\"'active'\")]", "#[CheckEnum(UserStatus::class, name: 'chk_users_status')]", "#[Index(where: \"status <> 'deleted'\")]"], "string \$status = 'active'"],
@@ -260,7 +372,7 @@ final class Scenario
                 'price' => [['#[Decimal(12, 2)]', "#[Check('price >= 0', name: 'chk_products_price')]"], "string \$price = '0'"],
                 'stock' => [['#[Integer]', "#[Index(['title'], include: ['price'], name: 'stock_cover')]"], 'int $stock = 0'],
                 'weight' => [['#[FloatType]'], '?float $weight = null'],
-                'photo' => [['#[Blob]'], '?string $photo = null'],
+                'photo' => [["#[Blob(size: 'medium')]"], '?string $photo = null'],
                 'digest' => [['#[Binary(32)]'], '?string $digest = null'],
                 'tags' => [["#[Type('TEXT[]')]", '#[Index(method: IndexMethod::GIN)]'], '?string $tags = null'],
             ]],
@@ -290,7 +402,7 @@ final class Scenario
                 'uid' => [['#[Uuid(asBinary: true)]'], '?string $uid = null'],
                 'happened' => [['#[Timestamp]', "#[DefaultVal('CURRENT_TIMESTAMP')]"], "string \$happened = ''"],
             ]],
-        ], ['pg_trgm']);
+        ], ['pg_trgm' => "'pg_trgm'"]);
     }
 
     /** Every #[RenamedFrom] taken out: a version that recorded it, cleaned as `snapshot clean` does. */
@@ -307,8 +419,8 @@ final class Scenario
         return $s;
     }
 
-    /** @return list<string> `$old` replaced by `$new` — or taken out. */
-    private static function swap(array $attrs, string $old, ?string $new): array
+    /** @return list<string> `$old` replaced by `$new` — or taken out; `$old` must be there. */
+    public static function swap(array $attrs, string $old, ?string $new): array
     {
         if (!in_array($old, $attrs, true)) {
             throw new \LogicException("No {$old} among " . implode(' ', $attrs));

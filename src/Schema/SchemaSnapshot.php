@@ -121,6 +121,7 @@ final class SchemaSnapshot
                 'setPrimaryKey'  => 'change_' . self::short($c['table']) . '_key',
                 'createSchema'   => 'create_schema_' . $c['name'],
                 'createExtension' => 'add_' . $c['name'],
+                'dropExtension'  => 'drop_' . $c['name'],
                 default          => null,
             };
             if ($w !== null && !in_array($w, $words, true)) {
@@ -205,6 +206,7 @@ final class SchemaSnapshot
             'dropIndex'      => "- index      {$c['name']}",
             'createSchema'   => "+ schema     {$c['name']}",
             'createExtension' => "+ extension  {$c['name']}",
+            'dropExtension'  => "- extension  {$c['name']}",
             'addConstraint'  => "+ {$c['kind']}" . str_repeat(' ', max(1, 11 - strlen($c['kind']))) . $c['name'],
             'dropConstraint' => "- {$c['kind']}" . str_repeat(' ', max(1, 11 - strlen($c['kind']))) . $c['name'],
             default          => $c['op'],

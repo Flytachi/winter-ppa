@@ -18,8 +18,8 @@ The database is emptied — give it one of its own.
 | --- | --- |
 | **Stage 1** — V001–V005 | six tables with every attribute ppa has (types, keys, every index kind and parameter, checks, foreign keys, a schema, an extension); a column added to four tables, three renamed, three dropped and one kept (`--keep`); then added, renamed and dropped in one version, back to the shape of V001 |
 | **Stage 2** — data | rows in every table, and the dirt stage 3 must live with: duplicate names, NULL notes, references to no row |
-| **Stage 3** — V006–V022 | partial indexes changed, HASH → GIN with trigrams, a new extension and a GiST index, a unique index over duplicates (`before()`), INCLUDE and composite indexes, ON DELETE changed, a foreign key over orphans (`before()`), types widened, a narrowing (`after()`), NOT NULL over NULLs, an enum's CHECK widened, a column with its key and index renamed, a new table filled by code, a primary key changed, a table dropped, a version of code only, a kept column dropped at last, a last mix |
-| **Errors** | what `snapshot` must refuse (12 cases) and `migrate` must refuse or roll back (7) |
+| **Stage 3** — V006–V022 | on tables full of rows: **indexes** — WHERE changed, a named index renamed and moved to another column, INCLUDE, composite and named unique ones, an operator class, HASH → GIN with trigrams, GiST, an index of every parameter; **foreign keys** — every ON UPDATE / ON DELETE action, renamed by `name:`, dropped, added over orphans (`before()`), a repository key made a table key, what CASCADE and RESTRICT do (tried and rolled back); **checks** — an expression changed, a string and an int enum, one dropped, a table-level one renamed; **ids** — SMALLINT → INT identity, GENERATED ALWAYS on and off, `always:` on every id, a primary key of two columns; **extensions** — added with version, schema and cascade, dropped with `--drop=extension:`; types widened and narrowed, NOT NULL over NULLs, new tables filled by code, a table dropped, a version of code only |
+| **Errors** | what `snapshot` must refuse (12 cases) or keep (an extension without `--drop`), and what `migrate` must refuse or roll back (7) |
 
 Each snapshot is taken from the entities — real PHP classes with real attributes, written
 for each state (`State::code()`) and mapped by `PPAMapping` — and must record what the step
@@ -47,4 +47,5 @@ NULL, defaults, identity), indexes (their definitions), constraints, extensions,
 | `src/Runner.php` | the variants, the errors, the report |
 | `src/Db.php` | the connection, the reset, the schema dump A / B / C are compared by |
 
-A new attribute in `src/Mapping/Attributes/` fails the run until a state uses it.
+A new attribute in `src/Mapping/Attributes/`, a new parameter of one, a new `FKAction` or
+`IndexMethod` fails the run (Coverage) until a state uses it.

@@ -172,12 +172,13 @@ final class Runner
             ['a rename without #[RenamedFrom]', $last->renamed('users', 'email', 'mail', ['#[Varchar(160)]', '#[Unique]'], "string \$mail = ''"), '/users\.email is gone from the entity/'],
             ['#[RenamedFrom] of no column', $last->with('users', 'nick', ['#[Varchar(20)]', "#[RenamedFrom('nope')]"], '?string $nick = null'), '/`nope` is not a column of the last snapshot/'],
             ['NOT NULL without a default', $last->with('users', 'code', ['#[Varchar(8)]'], 'string $code'), '/users\.code is NOT NULL with no default/'],
-            ['a narrowing, not custom', $last->attrs('users', 'name', fn($a) => array_map(fn($x) => $x === '#[Varchar(200)]' ? '#[Varchar(50)]' : $x, $a)), '/users\.name/'],
-            ['a primary key changed, not custom', $last->attrs('audit_log', 'happened', fn($a) => array_filter($a, fn($x) => $x !== '#[Primary]')), '/primary key changes/'],
-            ['a unique HASH index', $last->attrs('users', 'email', fn($a) => array_map(fn($x) => $x === '#[Unique]' ? '#[Unique(method: IndexMethod::HASH)]' : $x, $a)), '/a unique index is a B-tree/'],
+            ['a narrowing, not custom', $last->attrs('users', 'name', fn($a) => Scenario::swap($a, '#[Varchar(200)]', '#[Varchar(50)]')), '/users\.name/'],
+            ['a primary key changed, not custom', $last->attrs('audit_log', 'happened', fn($a) => Scenario::swap($a, '#[Primary]', null)), '/primary key changes/'],
+            ['a unique HASH index', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Unique(method: IndexMethod::HASH)]']), '/a unique index is a B-tree/'],
+            ['an extension dropped without --drop', $last->withoutExtension('btree_gist')->attrs('audit_log', 'level', fn($a) => Scenario::swap($a, '#[Index(method: IndexMethod::GIST)]', null)), null],
             ['GIN on a VARCHAR', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index(method: IndexMethod::GIN)]']), '/no GIN operator class for locale/'],
             ['HASH of two columns', $last->attrs('users', 'locale', fn($a) => [...$a, "#[Index(['email'], method: IndexMethod::HASH)]"]), '/a HASH index has one column/'],
-            ['trigrams without pg_trgm', new State($last->tables, ['btree_gist']), '/comes with the extension pg_trgm/'],
+            ['trigrams without pg_trgm', $last->withoutExtension('pg_trgm'), '/comes with the extension pg_trgm/'],
             ['two indexes of one name', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index]', '#[Index]']), '/two indexes are named public\.users_locale_idx|two indexes are named users_locale_idx/'],
         ];
         $dir = $this->copy($full, 'err');
@@ -185,6 +186,12 @@ final class Runner
         foreach ($refused as $j => [$what, $state, $why]) {
             $this->check($what, function () use ($dir, $state, $why, $j): string {
                 $diff = $this->diff($dir, new Step(4, 'refused', $state, ''), "R{$j}");
+                if ($why === null) {
+                    // Not refused — not done either: an extension leaves only by --drop.
+                    expect(!in_array('dropExtension', array_column($diff->changes, 'op'), true), 'the extension would be dropped');
+                    expect((bool) preg_grep('/--drop=extension:btree_gist drops it/', $diff->notices), 'no notice says how to drop it');
+                    return 'kept, said';
+                }
                 expect($diff->errors !== [], 'the snapshot was not refused');
                 expect((bool) preg_grep($why, $diff->errors), 'refused for another reason: ' . implode(' ', $diff->errors));
                 return 'refused';
@@ -330,26 +337,100 @@ final class Runner
         }
     }
 
+    /**
+     * Every attribute of ppa, every parameter of it, every FKAction and IndexMethod: used by
+     * some state, or the run fails — a new one is a gap until the scenario uses it.
+     */
     private function coverage(): void
     {
         Out::block('Coverage');
-        $this->check('every attribute of ppa is in the scenario', function (): string {
-            $used = [];
-            foreach ($this->steps as $step) {
-                $used += array_flip($step->state->attributeNames());
+        $usages = [];
+        foreach ($this->steps as $step) {
+            $usages += array_flip($step->state->attributeUsages());
+        }
+        $usages = array_keys($usages);
+        $used = [];
+        foreach ($usages as $u) {
+            if (!preg_match('/^#\[(\w+)(?:\((.*)\))?\]$/s', $u, $m)) {
+                continue;
             }
-            $all = [];
-            $root = dirname(__DIR__, 2) . '/src/Mapping/Attributes';
-            foreach (glob($root . '/*/*.php') as $file) {
-                $class = 'Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\' . basename(dirname($file)) . '\\' . basename($file, '.php');
-                if (class_exists($class) && new \ReflectionClass($class)->getAttributes(\Attribute::class) !== []) {
-                    $all[] = basename($file, '.php');
+            $used[$m[1]] ??= [];
+            foreach (self::arguments($m[2] ?? '') as $k => $arg) {
+                $used[$m[1]][] = preg_match('/^(\w+)\s*:(?!:)/', $arg, $n) ? $n[1] : $k;
+            }
+        }
+        $classes = [];
+        foreach (glob(dirname(__DIR__, 2) . '/src/Mapping/Attributes/*/*.php') as $file) {
+            $class = 'Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\' . basename(dirname($file)) . '\\' . basename($file, '.php');
+            if (class_exists($class) && new \ReflectionClass($class)->getAttributes(\Attribute::class) !== []) {
+                $classes[basename($file, '.php')] = $class;
+            }
+        }
+        $this->check('every attribute', function () use ($classes, $used): string {
+            $missing = array_diff(array_keys($classes), array_keys($used));
+            expect($missing === [], 'used by no state: ' . implode(', ', $missing));
+            return count($classes) . ' attributes';
+        }, stop: false);
+        $this->check('every parameter of every attribute', function () use ($classes, $used): string {
+            $missing = [];
+            $count = 0;
+            foreach ($classes as $short => $class) {
+                $params = new \ReflectionClass($class)->getConstructor()?->getParameters() ?? [];
+                foreach ($params as $k => $p) {
+                    $count++;
+                    $given = $used[$short] ?? [];
+                    if (!in_array($p->getName(), $given, true) && !in_array($k, $given, true)) {
+                        $missing[] = "{$short}::\${$p->getName()}";
+                    }
                 }
             }
-            $missing = array_diff($all, array_keys($used));
-            expect($missing === [], 'not in any state: ' . implode(', ', $missing));
-            return count($all) . ' attributes';
-        });
+            expect($missing === [], 'given by no state: ' . implode(', ', $missing));
+            return "{$count} parameters";
+        }, stop: false);
+        $this->check('every FKAction and IndexMethod', function () use ($usages): string {
+            $text = implode("\n", $usages);
+            $missing = [];
+            foreach ([\Flytachi\Winter\Ppa\Mapping\Constants\FKAction::class, \Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod::class] as $enum) {
+                $short = substr($enum, (int) strrpos($enum, '\\') + 1);
+                foreach ($enum::cases() as $case) {
+                    if (!str_contains($text, "{$short}::{$case->name}")) {
+                        $missing[] = "{$short}::{$case->name}";
+                    }
+                }
+            }
+            expect($missing === [], 'used by no state: ' . implode(', ', $missing));
+            return count(\Flytachi\Winter\Ppa\Mapping\Constants\FKAction::cases()) + count(\Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod::cases()) . ' cases';
+        }, stop: false);
+    }
+
+    /** @return list<string> The arguments of an attribute, split at the commas of its own level. */
+    private static function arguments(string $args): array
+    {
+        $out = [];
+        $depth = 0;
+        $quote = null;
+        $cur = '';
+        for ($i = 0, $n = strlen($args); $i < $n; $i++) {
+            $ch = $args[$i];
+            if ($quote !== null) {
+                $quote = $ch === $quote ? null : $quote;
+            } elseif ($ch === "'" || $ch === '"') {
+                $quote = $ch;
+            } elseif ($ch === '(' || $ch === '[') {
+                $depth++;
+            } elseif ($ch === ')' || $ch === ']') {
+                $depth--;
+            } elseif ($ch === ',' && $depth === 0) {
+                $out[] = trim($cur);
+                $cur = '';
+                continue;
+            }
+            $cur .= $ch;
+        }
+        if (trim($cur) !== '') {
+            $out[] = trim($cur);
+        }
+        return $out;
     }
 
     private static function same(array $a, array $b): string

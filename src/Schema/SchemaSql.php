@@ -34,6 +34,10 @@ final class SchemaSql
         if ($c['op'] === 'createExtension') {
             return [$c['sql']];
         }
+        if ($c['op'] === 'dropExtension') {
+            // No CASCADE: what still uses it fails the version instead of going with it.
+            return ["DROP EXTENSION IF EXISTS \"{$c['name']}\""];
+        }
         $t = $c['table'];
         return match ($c['op']) {
             'createTable'    => [self::createTable($t, $c['columns'], $c['primaryKey'] ?? [], $driver)],
@@ -155,6 +159,8 @@ final class SchemaSql
     /** @return list<string> */
     private static function alterColumn(string $t, array $from, array $to, string $driver): array
     {
+        $from = SchemaModel::column($from);
+        $to = SchemaModel::column($to);
         $name = $from['name'];
         if ($driver === 'sqlite') {
             throw new SchemaException(
@@ -165,10 +171,14 @@ final class SchemaSql
             return ["ALTER TABLE {$t} MODIFY COLUMN " . self::columnDef($to)];
         }
         $out = [];
-        [$typeFrom] = SchemaDiff::base($from['type']);
-        [$typeTo] = SchemaDiff::base($to['type']);
+        [$typeFrom, $restFrom] = SchemaDiff::base($from['type']);
+        [$typeTo, $restTo] = SchemaDiff::base($to['type']);
         if ($typeFrom !== $typeTo) {
             $out[] = "ALTER TABLE {$t} ALTER COLUMN {$name} TYPE {$typeTo}";
+        }
+        if ($restFrom !== $restTo && SchemaDiff::identityMode($from['type'], $to['type'])) {
+            $mode = str_contains($restTo, 'ALWAYS') ? 'ALWAYS' : 'BY DEFAULT';
+            $out[] = "ALTER TABLE {$t} ALTER COLUMN {$name} SET GENERATED {$mode}";
         }
         if ($from['nullable'] !== $to['nullable']) {
             $out[] = "ALTER TABLE {$t} ALTER COLUMN {$name} " . ($to['nullable'] ? 'DROP NOT NULL' : 'SET NOT NULL');

@@ -23,6 +23,16 @@ enum UserStatusV2: string
     case Blocked = 'blocked';
 }
 
+/** An int-backed enum: its CHECK has bare values. */
+enum AuditLevel: int
+{
+    case Trace = 0;
+    case Debug = 1;
+    case Info = 2;
+    case Warn = 3;
+    case Error = 4;
+}
+
 final class Failure extends \RuntimeException
 {
 }

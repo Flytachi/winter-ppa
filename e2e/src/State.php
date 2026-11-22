@@ -18,7 +18,7 @@ final readonly class State
     /**
      * @param array<string, array{class: string, repo: string, schema: ?string, attrs: list<string>,
      *     props: array<string, array{0: list<string>, 1: string}>}> $tables
-     * @param list<string> $extensions The config's #[Extension]s.
+     * @param array<string, string> $extensions The config's #[Extension]s: name => the attribute's arguments.
      */
     public function __construct(public array $tables, public array $extensions)
     {
@@ -86,32 +86,38 @@ final readonly class State
         return new self($tables, $this->extensions);
     }
 
-    public function withExtension(string $name): self
+    public function withExtension(string $name, ?string $args = null): self
     {
-        return new self($this->tables, array_values(array_unique([...$this->extensions, $name])));
+        return new self($this->tables, [...$this->extensions, $name => $args ?? "'{$name}'"]);
     }
 
-    /** Every attribute the state uses, by its short name — what the coverage check counts. */
-    public function attributeNames(): array
+    public function withoutExtension(string $name): self
     {
-        $names = ['Table' => true, 'Migratable' => true];
-        if ($this->extensions !== []) {
-            $names['Extension'] = true;
+        $ext = $this->extensions;
+        unset($ext[$name]);
+        return new self($this->tables, $ext);
+    }
+
+    /** Every attribute the state writes, as written — what the coverage check reads. */
+    public function attributeUsages(): array
+    {
+        $out = ['#[Table]', '#[Migratable(priority: MigratablePriority::High)]'];
+        foreach ($this->extensions as $args) {
+            $out[] = "#[Extension({$args})]";
         }
         foreach ($this->tables as $t) {
-            foreach ([...$t['attrs'], ...array_merge(...array_map(fn($p) => $p[0], array_values($t['props'])))] as $a) {
-                if (preg_match('/^#\[(\w+)/', $a, $m)) {
-                    $names[$m[1]] = true;
-                }
+            array_push($out, ...$t['attrs']);
+            foreach ($t['props'] as [$attrs]) {
+                array_push($out, ...$attrs);
             }
         }
-        return array_keys($names);
+        return array_values(array_unique($out));
     }
 
     /** The state as PHP, in a namespace of its own: a process cannot declare a class twice. */
     public function code(string $namespace): string
     {
-        $ext = implode("\n", array_map(fn($e) => "#[Extension('{$e}')]", $this->extensions));
+        $ext = implode("\n", array_map(fn($args) => "#[Extension({$args})]", $this->extensions));
         $out = <<<PHP
             <?php
 
@@ -120,7 +126,7 @@ final readonly class State
             namespace {$namespace};
 
             use Flytachi\\Winter\\Cdo\\Config\\PgDbConfig;
-            use Flytachi\\Winter\\Ppa\\E2e\\{UserStatus, UserStatusV2};
+            use Flytachi\\Winter\\Ppa\\E2e\\{AuditLevel, UserStatus, UserStatusV2};
             use Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\Additive\\{DefaultVal, NullableIs};
             use Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\Config\\{Extension, Migratable};
             use Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\Constraint\\{Check, CheckEnum, ForeignKey, ForeignRepo};
