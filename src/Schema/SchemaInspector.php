@@ -141,9 +141,8 @@ final class SchemaInspector
                     $notes[] = "{$table}: index {$name} is there, the model has no such index";
                 }
             }
-            if ($this->driver === 'sqlite') {
-                continue;                              // SQLite keeps no constraint names worth trusting
-            }
+            // SQLite too: its constraints are read from the CREATE TABLE by name — a rebuild in
+            // a version's code must name them as the model does (CONSTRAINT <name> CHECK …).
             foreach ($want['constraints'] as $name => $c) {
                 if (($have['constraints'][$name] ?? null) !== $c['kind']) {
                     $diff[] = "{$table}: constraint {$name} is missing";

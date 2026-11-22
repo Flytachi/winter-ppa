@@ -9,8 +9,8 @@ namespace Flytachi\Winter\Ppa\Schema;
  * MariaDB) or `sqlite`. A change marked `"by": "code"` runs none — the version's code
  * makes it.
  *
- * SQLite cannot add a foreign key to a table that exists, drop a constraint, or change a
- * column: a new table gets its constraints inside its CREATE TABLE, and the rest is
+ * SQLite cannot add a constraint (a foreign key, a check) to a table that exists, drop one,
+ * or change a column: a new table gets its constraints inside its CREATE TABLE, and the rest is
  * refused here by name — that is a table rebuild, which is the version's code.
  */
 final class SchemaSql
@@ -194,9 +194,13 @@ final class SchemaSql
     /** @return list<string> */
     private static function addConstraint(string $t, array $c, string $driver): array
     {
-        if ($driver === 'sqlite' && $c['kind'] === 'foreign') {
+        // Not by the SQLite of the machine a version is recorded on: a version is applied by
+        // any, and ALTER TABLE … ADD CONSTRAINT is new to SQLite (3.54 has it, the SQLite PHP
+        // ships on most servers does not).
+        if ($driver === 'sqlite') {
+            $what = $c['kind'] === 'foreign' ? 'foreign key' : 'check';
             throw new SchemaException(
-                "{$t}: SQLite cannot add the foreign key {$c['name']} to a table that exists — "
+                "{$t}: SQLite cannot add the {$what} {$c['name']} to a table that exists — "
                 . "the table is rebuilt in the version's code."
             );
         }

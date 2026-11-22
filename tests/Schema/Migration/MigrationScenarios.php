@@ -164,7 +164,7 @@ abstract class MigrationScenarios extends TestCase
         }
         self::assertSame(['kept'], $this->col('SELECT ' . ($this->driver === 'mysql' ? 'comment' : 'note') . ' FROM orders'));
 
-        $this->code($v2, after: "\$db->exec(\"UPDATE orders SET status = 'done' WHERE total > 100\");");
+        $this->code($v2, after: $this->v2After($v2));
         $done = $this->migrator()->migrate();
 
         self::assertSame('applied', $done[0]['action']);
@@ -352,9 +352,39 @@ abstract class MigrationScenarios extends TestCase
         $this->code(
             $v,
             before: '$db->exec("DELETE FROM customers WHERE id NOT IN (SELECT id FROM (SELECT MIN(id) AS id FROM customers GROUP BY email) k)");',
-            after: $after ?? "\$db->exec(\"UPDATE orders SET status = 'done' WHERE total > 100\");",
+            after: $after ?? $this->v2After($v),
         );
         return $v;
+    }
+
+    /**
+     * What V2's after() does: the status of the big orders — and on SQLite the CHECK on the
+     * total, which it cannot add to a table that exists ("by": "code"): the table rebuilt.
+     */
+    protected function v2After(SchemaVersionFile $v): string
+    {
+        $code = "\$db->exec(\"UPDATE orders SET status = 'done' WHERE total > 100\");";
+        return $this->driver === 'sqlite' ? $code . $this->sqliteRebuild('orders') : $code;
+    }
+
+    /**
+     * A table rebuilt the SQLite way, as a version's code does it: the new table from the
+     * model (its constraints inside the CREATE TABLE, named), the rows copied, the old
+     * dropped, its indexes made again.
+     */
+    protected function sqliteRebuild(string $table): string
+    {
+        $model = [$table => SchemaModel::fold($this->history->versions())[$table]];
+        $sql = SchemaSql::create($model, 'sqlite');
+        $columns = implode(', ', array_keys(SchemaModel::live($model)[$table]['columns']));
+        $steps = [
+            "ALTER TABLE {$table} RENAME TO {$table}_old",
+            $sql[0],
+            "INSERT INTO {$table} ({$columns}) SELECT {$columns} FROM {$table}_old",
+            "DROP TABLE {$table}_old",
+            ...array_slice($sql, 1),
+        ];
+        return implode('', array_map(fn(string $q) => ' $db->exec(' . var_export($q, true) . ');', $steps));
     }
 
     /** V3: a foreign key to customers, a wider total — not on SQLite (it cannot alter either). */

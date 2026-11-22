@@ -172,7 +172,14 @@ final class SchemaDiffTest extends TestCase
     public function test_sqlite_refuses_at_snapshot_what_it_cannot_do_by_itself(): void
     {
         $this->record(['customers' => F\CustomerV1::class, 'orders' => F\OrderV1::class], driver: 'sqlite');
-        $this->record(['customers' => F\CustomerV2::class, 'orders' => F\OrderV2::class], driver: 'sqlite');
+        // V2 adds a CHECK to orders: not by SQLite itself (ALTER TABLE … ADD CONSTRAINT is new
+        // to it, and a version is applied by any SQLite) — a custom version's code.
+        $v2 = ['customers' => F\CustomerV2::class, 'orders' => F\OrderV2::class];
+        self::assertStringContainsString('SQLite cannot add the check', implode("\n", $this->diff($v2, driver: 'sqlite')->errors));
+        $custom = $this->diff($v2, driver: 'sqlite', custom: true);
+        self::assertSame([], $custom->errors);
+        self::assertSame(['addConstraint'], array_column(array_filter($custom->changes, fn($c) => ($c['by'] ?? null) === 'code'), 'op'));
+        SchemaSnapshot::write($this->history, $custom, 'sqlite', 'v2', true);
 
         $diff = $this->diff(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class], driver: 'sqlite');
 

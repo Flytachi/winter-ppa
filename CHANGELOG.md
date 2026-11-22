@@ -66,6 +66,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **SQLite: a CHECK added to a table that exists was `ALTER TABLE … ADD CONSTRAINT`** — new to
+  SQLite (3.54 has it; 3.40–3.46, what PHP ships on most servers and CI runners, says "syntax
+  error"). A version is recorded once and applied by any SQLite, so it is now refused like a
+  foreign key: a custom version rebuilds the table (`"by": "code"`); a table the version creates
+  still gets it inside its CREATE TABLE. And the check after a version now compares SQLite's
+  constraints too (by name, from its CREATE TABLE): a rebuild that forgot one fails the version.
 - **A PostgreSQL array column (`#[Type('TEXT[]')]`) failed the check after its version**: the
   server names it `_text`, the model `TEXT[]` — "expected text[], found _text". One spelling now.
 - **The same version code met twice in a process was a fatal "cannot redeclare class"** — a

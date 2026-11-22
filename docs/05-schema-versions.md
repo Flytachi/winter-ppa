@@ -107,8 +107,8 @@ It never guesses; each refusal names what to write.
   the model: later diffs leave it alone, a fresh database does not get it);
 - a NOT NULL column with no default added to an existing table → error (its rows have no value);
 - a type change that is not a widening, a primary key change → only in a custom version, `"by": "code"`;
-- what the driver cannot do itself (SQLite: alter a column, add a foreign key to an existing
-  table, drop a constraint) → `SchemaSnapshot::diff()` tries `SchemaSql` on each change and says so.
+- what the driver cannot do itself (SQLite: alter a column, add a foreign key or a check to an
+  existing table, drop a constraint) → `SchemaSnapshot::diff()` tries `SchemaSql` on each change and says so.
 
 Widening (`SchemaDiff::widens()`): a longer VARCHAR, VARCHAR → TEXT, SMALLINT → INT → BIGINT, a
 DECIMAL with as many digits on each side of the point or more. An identity / AUTO_INCREMENT that
@@ -144,7 +144,7 @@ recorded as done is checked against its checksum.
 | transaction per version | yes | no (DDL commits) | yes |
 | lock | `pg_advisory_lock` (`lock_timeout`) | `GET_LOCK` | none (the writer takes the file) |
 | alter a column | TYPE / SET / DROP each | `MODIFY COLUMN` | refused — rebuild in code |
-| foreign key on an existing table | `ALTER TABLE` | `ALTER TABLE` | refused; inside CREATE TABLE when the version creates the table |
+| foreign key / check on an existing table | `ALTER TABLE` | `ALTER TABLE` | refused — rebuild in code (`ADD CONSTRAINT` is new to SQLite: 3.54 has it, the SQLite PHP ships on most servers does not, and a version is applied by any); inside CREATE TABLE when the version creates the table |
 | drop a constraint | `DROP CONSTRAINT` | `DROP FOREIGN KEY` / `DROP CONSTRAINT` | refused |
 | history table | in `getSchema()` | the database | the file |
 
@@ -153,6 +153,8 @@ key / unique constraints; MySQL's index named after a foreign key; MariaDB's CHE
 JSON column (its JSON is LONGTEXT + CHECK — `canonical()` treats `json` and `longtext` as one on
 `mysql`). MySQL reports BOOLEAN as `tinyint(1)` — told apart before display widths are dropped.
 
+Constraints are compared by name on every driver — SQLite's read from its CREATE TABLE, so a
+rebuild in a version's code names them as the model does (`CONSTRAINT <name> CHECK …`).
 Type comparison uses `SchemaInspector::canonical()`; defaults are not compared (each server
 rewrites them: `'0'::numeric`, `now()`…).
 
