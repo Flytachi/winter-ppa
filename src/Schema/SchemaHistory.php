@@ -130,34 +130,70 @@ final class SchemaHistory
      * moment waits here, and then finds nothing left to do. PostgreSQL: an advisory lock;
      * MySQL, MariaDB: GET_LOCK; SQLite: none — its writer takes the file.
      *
-     * @param callable(): void|null $waiting Told once when another instance holds it.
+     * Both locks belong to the holder's connection: an instance that dies releases it with
+     * its connection, so a lock is never left behind — waiting with no limit is safe.
+     *
+     * @param int $timeout Seconds to wait at most; 0: as long as another instance holds it.
+     * @param callable(int): void|null $waiting Told when another instance holds it, with the
+     *     seconds waited so far: 0 at once, then every `$every` seconds.
      * @throws SchemaException Not taken within `$timeout` seconds.
      */
-    public function lock(int $timeout = 300, ?callable $waiting = null): void
+    public function lock(int $timeout = 300, ?callable $waiting = null, int $every = 30): void
     {
-        if ($this->driver === 'pgsql') {
-            $key = $this->lockKey();
-            if (!(bool) $this->db->query("SELECT pg_try_advisory_lock({$key})")->fetchColumn()) {
-                $waiting && $waiting();
-                $this->db->exec("SET lock_timeout = '" . ($timeout * 1000) . "ms'");
-                try {
-                    $this->db->query("SELECT pg_advisory_lock({$key})")->fetchColumn();
-                } catch (\PDOException $e) {
-                    throw new SchemaException("The schema lock was not released within {$timeout} s.", previous: $e);
-                } finally {
-                    $this->db->exec('RESET lock_timeout');
-                }
+        if ($this->driver !== 'pgsql' && $this->driver !== 'mysql') {
+            $this->locked = true;
+            return;
+        }
+        if ($this->tryLock(0)) {
+            $this->locked = true;
+            return;
+        }
+        $waited = 0;
+        while (true) {
+            $waiting && $waiting($waited);
+            $slice = $timeout > 0 ? min($every, $timeout - $waited) : $every;
+            if ($slice <= 0) {
+                throw new SchemaException("The schema lock was not released within {$timeout} s.");
             }
-        } elseif ($this->driver === 'mysql') {
-            $name = $this->db->quote('winter_ppa_schema:' . $this->db->query('SELECT DATABASE()')->fetchColumn());
-            if ((int) $this->db->query("SELECT GET_LOCK({$name}, 0)")->fetchColumn() !== 1) {
-                $waiting && $waiting();
-                if ((int) $this->db->query("SELECT GET_LOCK({$name}, {$timeout})")->fetchColumn() !== 1) {
-                    throw new SchemaException("The schema lock was not released within {$timeout} s.");
-                }
+            if ($this->tryLock($slice)) {
+                $this->locked = true;
+                return;
+            }
+            $waited += $slice;
+            if ($timeout > 0 && $waited >= $timeout) {
+                throw new SchemaException("The schema lock was not released within {$timeout} s.");
             }
         }
-        $this->locked = true;
+    }
+
+    /** Takes the lock, waiting `$seconds` at most (0: not at all). */
+    private function tryLock(int $seconds): bool
+    {
+        if ($this->driver === 'mysql') {
+            $name = $this->lockName();
+            return (int) $this->db->query("SELECT GET_LOCK({$name}, {$seconds})")->fetchColumn() === 1;
+        }
+        $key = $this->lockKey();
+        if ($seconds === 0) {
+            return (bool) $this->db->query("SELECT pg_try_advisory_lock({$key})")->fetchColumn();
+        }
+        $this->db->exec("SET lock_timeout = '" . ($seconds * 1000) . "ms'");
+        try {
+            $this->db->query("SELECT pg_advisory_lock({$key})")->fetchColumn();
+            return true;
+        } catch (\PDOException $e) {
+            if (($e->errorInfo[0] ?? $e->getCode()) === '55P03') {
+                return false;           // lock_not_available: the slice is over, still held
+            }
+            throw $e;
+        } finally {
+            $this->db->exec('RESET lock_timeout');
+        }
+    }
+
+    private function lockName(): string
+    {
+        return $this->db->quote('winter_ppa_schema:' . $this->db->query('SELECT DATABASE()')->fetchColumn());
     }
 
     public function unlock(): void
@@ -168,8 +204,7 @@ final class SchemaHistory
         if ($this->driver === 'pgsql') {
             $this->db->query('SELECT pg_advisory_unlock(' . $this->lockKey() . ')')->fetchColumn();
         } elseif ($this->driver === 'mysql') {
-            $name = $this->db->quote('winter_ppa_schema:' . $this->db->query('SELECT DATABASE()')->fetchColumn());
-            $this->db->query("SELECT RELEASE_LOCK({$name})")->fetchColumn();
+            $this->db->query('SELECT RELEASE_LOCK(' . $this->lockName() . ')')->fetchColumn();
         }
         $this->locked = false;
     }

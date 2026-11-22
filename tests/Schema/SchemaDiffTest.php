@@ -292,7 +292,7 @@ final class SchemaDiffTest extends TestCase
     public static function renameTableSql(): iterable
     {
         $c = ['op' => 'renameTable', 'from' => 'public.order', 'to' => 'shop.orders', 'indexes' => ['order_note_idx' => 'orders_note_idx', 'x_idx' => 'x_idx'], 'constraints' => ['fk_order_user_id' => 'fk_orders_user_id']];
-        yield 'mysql' => ['mysql', ['RENAME TABLE public.order TO shop.orders', 'ALTER TABLE shop.orders RENAME INDEX order_note_idx TO orders_note_idx']];
+        yield 'mysql' => ['mysql', ['ALTER TABLE public.order RENAME TO shop.orders, RENAME INDEX order_note_idx TO orders_note_idx']];
         yield 'pgsql' => ['pgsql', [
             'ALTER TABLE public.order SET SCHEMA shop',
             'ALTER TABLE shop.order RENAME TO orders',

@@ -81,6 +81,9 @@ final class SchemaMigrator
     }
 
     /**
+     * @param int $lockTimeout Seconds to wait for another instance's run, at most; 0: as long
+     *     as it runs — the start of an application, which must not fail because another
+     *     instance migrates for minutes (the lock dies with its holder's connection).
      * @return list<array{version: string, action: string, ms: int}> What was done: `created`,
      *     `baseline` or `applied` per version.
      * @throws SchemaException The run was refused, or a version failed — its message names the
@@ -93,9 +96,9 @@ final class SchemaMigrator
             return [];
         }
         $this->history->ensure();
-        $this->history->lock($lockTimeout, fn() => $this->logger->info(
-            "{$this->label}: waiting for the schema lock — another instance is migrating"
-        ));
+        $this->history->lock($lockTimeout, fn(int $waited) => $this->logger->info($waited === 0
+            ? "{$this->label}: waiting for the schema lock — another instance is migrating"
+            : "{$this->label}: still waiting for the schema lock — " . self::seconds($waited)));
         try {
             $rows = $this->history->rows();
             $problems = $this->problems($versions, $rows);
@@ -111,6 +114,14 @@ final class SchemaMigrator
                 $rows = $this->history->rows();
             }
             foreach ($this->pending($versions, $rows) as $v) {
+                if (($rows[$v->version]['state'] ?? null) === 'running') {
+                    // Only where a schema change commits at once: the run before was stopped
+                    // midway (killed, a restart) — what it did is there, the rest is not.
+                    $this->logger->warning(
+                        "{$this->label}: {$v->label()} was stopped midway the last time — it runs again, "
+                        . 'its done steps skipped and its code run again'
+                    );
+                }
                 $done[] = $this->apply($v, $versions);
             }
             if ($done === []) {
@@ -346,6 +357,12 @@ final class SchemaMigrator
             fn(SchemaVersionFile $v) => ['version' => $v->version, 'action' => $action, 'ms' => 0],
             $versions,
         );
+    }
+
+    /** 150 → "2m30s". */
+    private static function seconds(int $s): string
+    {
+        return $s >= 60 ? intdiv($s, 60) . 'm' . ($s % 60) . 's' : "{$s}s";
     }
 
     private static function ms(int $t0): int

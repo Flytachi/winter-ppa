@@ -245,13 +245,16 @@ final class SchemaSql
         [$toSchema, $toName] = SchemaModel::splitName($c['to']);
         $to = $c['to'];
         if ($driver === 'mysql') {
-            $sql = ["RENAME TABLE {$c['from']} TO {$to}"];
+            // One statement: a schema change commits at once there, and a version stopped
+            // between a RENAME TABLE and its RENAME INDEX found the table renamed, skipped the
+            // step and failed on the index names at every run after.
+            $alter = ["RENAME TO {$to}"];
             foreach ($c['indexes'] ?? [] as $old => $new) {
                 if ($old !== $new) {
-                    $sql[] = "ALTER TABLE {$to} RENAME INDEX {$old} TO {$new}";
+                    $alter[] = "RENAME INDEX {$old} TO {$new}";
                 }
             }
-            return $sql;
+            return ["ALTER TABLE {$c['from']} " . implode(', ', $alter)];
         }
         if ($driver === 'sqlite') {
             if ($fromSchema !== $toSchema) {

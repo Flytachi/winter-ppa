@@ -283,6 +283,32 @@ abstract class MigrationScenarios extends TestCase
         self::assertEquals($upgraded, new SchemaInspector($this->db, $this->driver)->table($prefix . 'clients'));
     }
 
+    public function test_a_version_stopped_midway_runs_again_from_where_it_stood(): void
+    {
+        if ($this->driver !== 'mysql') {
+            self::markTestSkipped('Only where a schema change commits at once: elsewhere a stopped version rolls back.');
+        }
+        $this->snapshot(['customers' => F\CustomerV2::class, 'orders' => F\OrderV1::class], 'v1');
+        $this->migrator()->migrate();
+        $this->db->exec("INSERT INTO customers (name, email) VALUES ('Ann', 'ann@x'), ('Bob', 'bob@x')");
+        $v2 = $this->snapshot(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV1::class], 'clients');
+
+        // What a process killed after its first step leaves: the row "running", that step done.
+        $history = new SchemaHistory($this->db, $this->driver, self::OWNER, $this->config->getSchema());
+        $history->record($v2, 'running');
+        foreach (SchemaSql::plan($v2->changes, $this->driver)[0]['sql'] as $sql) {
+            $this->db->exec($sql);
+        }
+
+        $done = $this->migrator()->migrate();
+
+        self::assertSame([['V002', 'applied']], array_map(fn($d) => [$d['version'], $d['action']], $done));
+        self::assertSame('applied', $this->rows()['V002']['state']);
+        self::assertSame([], $this->differences());
+        self::assertSame(['Ann', 'Bob'], $this->col('SELECT name FROM clients ORDER BY id'));
+        self::assertStringContainsString('V002_clients was stopped midway the last time', implode("\n", array_column($this->log, 1)));
+    }
+
     public function test_two_histories_in_one_database_keep_apart(): void
     {
         $this->v1();
@@ -361,6 +387,75 @@ abstract class MigrationScenarios extends TestCase
             $holder->unlock();
             self::assertStringContainsString('waiting for the schema lock', implode("\n", array_column($this->log, 1)));
         }
+    }
+
+    public function test_with_no_limit_it_waits_and_says_so_until_the_holder_dies(): void
+    {
+        if ($this->driver === 'sqlite') {
+            self::markTestSkipped('SQLite: the writer takes the file, there is no schema lock.');
+        }
+        $history = new SchemaHistory($this->db, $this->driver, self::OWNER, $this->config->getSchema());
+        $history->ensure();
+        $held = sys_get_temp_dir() . '/ppa_lock_' . getmypid() . '_' . bin2hex(random_bytes(4));
+        $other = $this->config::class;
+
+        $pid = pcntl_fork();
+        if ($pid === 0) {
+            // Another instance: takes the lock and dies holding it — no unlock, a SIGKILL.
+            $second = new $other();
+            $second->setUp();
+            new SchemaHistory($second->connection(), $this->driver, self::OWNER, $this->config->getSchema())->lock();
+            touch($held);
+            sleep(2);
+            posix_kill(getmypid(), SIGKILL);
+        }
+        try {
+            for ($i = 0; $i < 100 && !is_file($held); $i++) {
+                usleep(50_000);
+            }
+            self::assertFileExists($held, 'the other instance took the lock');
+
+            $said = [];
+            $t0 = microtime(true);
+            $history->lock(timeout: 0, waiting: function (int $waited) use (&$said): void {
+                $said[] = $waited;
+            }, every: 1);
+            $history->unlock();
+
+            self::assertGreaterThanOrEqual(1.0, microtime(true) - $t0, 'it waited');
+            self::assertSame(0, $said[0], 'said at once');
+            self::assertGreaterThanOrEqual(2, count($said), 'and again while it waited');
+            self::assertSame(range(0, count($said) - 1), $said, 'once a second');
+        } finally {
+            pcntl_waitpid($pid, $status);
+            @unlink($held);
+        }
+    }
+
+    public function test_a_limit_is_reported_every_slice_and_then_refused(): void
+    {
+        if ($this->driver === 'sqlite') {
+            self::markTestSkipped('SQLite: the writer takes the file, there is no schema lock.');
+        }
+        $other = $this->config::class;
+        $second = new $other();
+        $second->setUp();
+        $holder = new SchemaHistory($second->connection(), $this->driver, self::OWNER, $this->config->getSchema());
+        $holder->ensure();
+        $holder->lock();
+        $said = [];
+        try {
+            new SchemaHistory($this->db, $this->driver, self::OWNER, $this->config->getSchema())
+                ->lock(timeout: 2, waiting: function (int $waited) use (&$said): void {
+                    $said[] = $waited;
+                }, every: 1);
+            self::fail('refused after 2 s');
+        } catch (SchemaException $e) {
+            self::assertStringContainsString('not released within 2 s', $e->getMessage());
+        } finally {
+            $holder->unlock();
+        }
+        self::assertSame([0, 1], $said);
     }
 
     // ── The application's history: three versions ───────────────────────────

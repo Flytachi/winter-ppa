@@ -140,8 +140,11 @@ its constraints first.
 
 PostgreSQL and SQLite: one transaction per version, its row inside it. MySQL / MariaDB: schema
 changes commit at once — the row is `running` during the version and `failed` if it throws; the
-next run starts it again, its done steps skipped. A failed version may be edited: only a version
-recorded as done is checked against its checksum.
+next run starts it again, its done steps skipped — `running` left behind (the process killed) is
+said with a warning. Each step is one statement there (a table rename with its indexes too), so a
+stop never leaves a step half done. The version's code runs again in full: on MySQL / MariaDB write
+it to bear that (`UPDATE … WHERE x IS NULL`, `INSERT IGNORE`). A failed version may be edited: only a
+version recorded as done is checked against its checksum.
 
 ## Drivers
 
