@@ -46,6 +46,7 @@ final class SchemaSnapshot
             $keep,
             $custom,
             SchemaModel::objects($versions),
+            $driver,
         );
         // What the server would not build as declared: refused here, before it is recorded.
         $check = SchemaCheck::tables($tables, $driver, array_map(fn(Extension $e) => $e->name, $extensions));
@@ -119,6 +120,7 @@ final class SchemaSnapshot
                 'renameColumn'   => 'rename_' . $c['from'],
                 'alterColumn'    => 'change_' . $c['column'],
                 'setPrimaryKey'  => 'change_' . self::short($c['table']) . '_key',
+                'renameTable'    => 'rename_' . self::short($c['from']),
                 'createSchema'   => 'create_schema_' . $c['name'],
                 'createExtension' => 'add_' . $c['name'],
                 'dropExtension'  => 'drop_' . $c['name'],
@@ -204,6 +206,7 @@ final class SchemaSnapshot
             'setPrimaryKey'  => "~ key        {$t} PRIMARY KEY (" . implode(', ', $c['columns']) . "){$by}",
             'addIndex'       => "+ index      {$c['name']}",
             'dropIndex'      => "- index      {$c['name']}",
+            'renameTable'    => "~ table      {$c['from']} → {$c['to']}   (#[RenamedFrom])",
             'createSchema'   => "+ schema     {$c['name']}",
             'createExtension' => "+ extension  {$c['name']}",
             'dropExtension'  => "- extension  {$c['name']}",

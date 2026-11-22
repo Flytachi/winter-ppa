@@ -8,6 +8,7 @@ use Flytachi\Winter\Cdo\Config\Common\DbConfigInterface;
 use Flytachi\Winter\Ppa\Entity\RepositoryInterface;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Constraint\Check;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Entity\Table as EntityTable;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Migration\RenamedFrom;
 use Flytachi\Winter\Ppa\Mapping\ColumnMapping;
 use Flytachi\Winter\Ppa\Mapping\Structure\Table;
 use ReflectionAttribute;
@@ -97,6 +98,8 @@ final class PPAMapping
                     schema: $repository->getSchema(),
                 );
                 $table->entity = $reflectionClassEntity->getName();
+                $table->renamedFrom = ($reflectionClassEntity->getAttributes(RenamedFrom::class)[0] ?? null)
+                    ?->newInstance()->from;
                 $declaration->push($config, $table);
             } catch (ReflectionException) {
             }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Tests\Schema\Fixtures;
 
+use Flytachi\Winter\Ppa\Mapping\Attributes\Migration\RenamedFrom;
 use Flytachi\Winter\Ppa\Mapping\ColumnMapping;
 use Flytachi\Winter\Ppa\Mapping\Structure\Table;
 use ReflectionClass;
@@ -28,6 +29,7 @@ final class SchemaFixtures
             }
             $t = new Table(name: $name, columns: $mapping->getColumns(), schema: $schema);
             $t->entity = $class;
+            $t->renamedFrom = (new ReflectionClass($class)->getAttributes(RenamedFrom::class)[0] ?? null)?->newInstance()->from;
             $tables[] = $t;
         }
         return $tables;

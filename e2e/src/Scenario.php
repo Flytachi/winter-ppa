@@ -308,30 +308,41 @@ final class Scenario
 
         // V021 — the kept column dropped at last; a NOT NULL column with a default added; a
         // foreign key of a repository made a named key of a table.
+        // Two tables renamed: products → goods (a key of another table points at it), and
+        // audit_log moved to the schema shop as audit_events (an identity, a key of two
+        // columns, its indexes, checks and foreign key named after it).
         $s = $s->with('audit_log', 'source', ['#[Varchar(20)]', "#[DefaultVal(\"'app'\")]"], "string \$source = 'app'")
-            ->attrs('payments', 'order_id', fn($a) => self::swap($a, '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', "#[ForeignKey('orders', 'id', onDelete: FKAction::CASCADE, name: 'fk_payments_order')]"));
-        $steps[] = new Step(3, 'colour_gone', $s, 'the column kept by --keep dropped at last; a NOT NULL column with a default; a foreign key renamed', drop: ['shop.products.colour'], expect: ['dropColumn' => 1, 'addColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1], check: static function (\PDO $db, bool $data): void {
-            expect(one($db, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'colour'") == 0, 'colour is gone');
+            ->attrs('payments', 'order_id', fn($a) => self::swap($a, '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]', "#[ForeignKey('orders', 'id', onDelete: FKAction::CASCADE, name: 'fk_payments_order')]"))
+            ->retable('products', 'goods', 'shop', "#[RenamedFrom('products')]")
+            ->retable('audit_log', 'audit_events', 'shop', "#[RenamedFrom('public.audit_log')]");
+        $steps[] = new Step(3, 'tables_renamed', $s, 'two tables renamed, one into another schema, with what is named after them; the kept column dropped at last; a NOT NULL column with a default; a foreign key renamed', drop: ['shop.goods.colour'], expect: ['renameTable' => 2, 'dropColumn' => 1, 'addColumn' => 1, 'dropConstraint' => 1, 'addConstraint' => 1, 'dropIndex' => 0, 'addIndex' => 0], check: static function (\PDO $db, bool $data): void {
+            expect(one($db, "SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_name) FROM information_schema.tables WHERE table_name IN ('products', 'goods', 'audit_log', 'audit_events')") === 'shop.audit_events,shop.goods', 'the tables have their new names');
+            expect(one($db, "SELECT count(*) FROM pg_constraint WHERE conname IN ('goods_pkey', 'audit_events_pkey', 'fk_audit_events_user_ref')") == 3, 'the keys are named after the new tables');
+            expect(one($db, "SELECT count(*) FROM pg_class WHERE relkind = 'S' AND relname = 'audit_events_id_seq'") == 1, 'the identity sequence is renamed');
+            expect(one($db, "SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'products\\_%' OR indexname LIKE 'audit\\_log\\_%'") == 0, 'no index keeps an old name');
+            expect(str_contains((string) one($db, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'fk_items_product'"), 'REFERENCES shop.goods(id)'), 'the key of order_items points at goods');
+            expect(one($db, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'goods' AND column_name = 'colour'") == 0, 'colour is gone');
             expect(one($db, "SELECT count(*) FROM pg_constraint WHERE conname = 'fk_payments_order'") == 1, 'the payments key has its name');
             if ($data) {
-                expect(one($db, "SELECT count(*) FROM public.audit_log WHERE source = 'app'") == Data::AUDIT, 'every old row has the default');
+                expect(one($db, "SELECT count(*) FROM shop.audit_events WHERE source = 'app'") == Data::AUDIT, 'every row moved, with the default');
                 expect(one($db, 'SELECT count(*) FROM shop.payments') == Data::ORDERS_PAID, 'no payment lost with its key');
             }
         });
 
         // V022 — at once: added (with an index of every parameter), renamed (with a covering
         // index on it), dropped (with a GiST index on it), a unique index dropped.
-        $stock = $s->tables['products']['props']['stock'][0];
+        $s = self::clean($s);
+        $stock = $s->tables['goods']['props']['stock'][0];
         $s = $s->with('users', 'locale', ['#[Varchar(10)]', "#[Index(['email'], name: 'locale_full', method: IndexMethod::BTREE, where: \"locale <> ''\", opClass: 'varchar_pattern_ops', include: ['id'])]"], "string \$locale = 'en'")
-            ->renamed('products', 'stock', 'quantity', [...$stock, "#[RenamedFrom('stock')]"], 'int $quantity = 0')
+            ->renamed('goods', 'stock', 'quantity', [...$stock, "#[RenamedFrom('stock')]"], 'int $quantity = 0')
             ->without('orders', 'period')
             ->attrs('labels', 'name', fn($a) => self::swap($a, "#[Unique(method: IndexMethod::BTREE, name: 'label_name')]", null));
         $steps[] = new Step(3, 'last_mix', $s, 'added with an index of every parameter, renamed with a covering index, dropped with a GiST index, a unique index dropped', drop: ['public.orders.period'], expect: ['addColumn' => 1, 'renameColumn' => 1, 'dropColumn' => 1, 'dropIndex' => 3, 'addIndex' => 2], check: static function (\PDO $db, bool $data): void {
-            expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'products_stock_cover_idx'"), '(quantity, title) INCLUDE (price, sku)'), 'the covering index is on quantity');
+            expect(str_contains((string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'goods_stock_cover_idx'"), '(quantity, title) INCLUDE (price, sku)'), 'the covering index is on quantity');
             $full = (string) one($db, "SELECT indexdef FROM pg_indexes WHERE indexname = 'users_locale_full_idx'");
             expect(str_contains($full, 'locale varchar_pattern_ops, email) INCLUDE (id) WHERE'), "the index has every part: {$full}");
             if ($data) {
-                expect(one($db, 'SELECT sum(quantity) FROM shop.products') == Data::STOCK_SUM, 'the stock is in quantity');
+                expect(one($db, 'SELECT sum(quantity) FROM shop.goods') == Data::STOCK_SUM, 'the stock is in quantity');
             }
         });
 
@@ -408,6 +419,12 @@ final class Scenario
     /** Every #[RenamedFrom] taken out: a version that recorded it, cleaned as `snapshot clean` does. */
     private static function clean(State $s): State
     {
+        foreach ($s->tables as $table => $t) {
+            $kept = array_values(array_filter($t['attrs'], fn($a) => !str_starts_with($a, '#[RenamedFrom(')));
+            if ($kept !== $t['attrs']) {
+                $s = $s->table($table, ['attrs' => $kept]);
+            }
+        }
         foreach ($s->tables as $table => $t) {
             foreach ($t['props'] as $prop => [$attrs]) {
                 $kept = array_values(array_filter($attrs, fn($a) => !str_starts_with($a, '#[RenamedFrom(')));

@@ -258,6 +258,31 @@ abstract class MigrationScenarios extends TestCase
         self::assertSame($v1->checksum, $this->rows()[$v1->version]['checksum']);
     }
 
+    public function test_a_renamed_table_keeps_its_rows_and_is_named_as_a_fresh_one(): void
+    {
+        $prefix = $this->tableSchema() !== null ? $this->tableSchema() . '.' : '';
+        $this->snapshot(['customers' => F\CustomerV2::class, 'orders' => F\OrderV1::class], 'v1');
+        $this->migrator()->migrate();
+        $this->db->exec("INSERT INTO {$prefix}customers (name, email) VALUES ('Ann', 'ann@x'), ('Bob', 'bob@x')");
+
+        // customers → clients: #[RenamedFrom('customers')] on the class.
+        $v2 = $this->snapshot(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV1::class], 'clients');
+        self::assertSame('renameTable', $v2->changes[0]['op']);
+        self::assertNotContains('createTable', array_column($v2->changes, 'op'), 'a rename, not a new table');
+        $this->migrator()->migrate();
+
+        self::assertSame([], $this->differences());
+        self::assertSame(['Ann', 'Bob'], $this->col("SELECT name FROM {$prefix}clients ORDER BY id"));
+        $upgraded = new SchemaInspector($this->db, $this->driver)->table($prefix . 'clients');
+        self::assertNull(new SchemaInspector($this->db, $this->driver)->table($prefix . 'customers'));
+        self::assertSame(['clients_email_udx'], array_values($upgraded['indexes']));
+
+        // A fresh database of the same history: the same table, named alike.
+        $this->reset();
+        $this->migrator()->migrate();
+        self::assertEquals($upgraded, new SchemaInspector($this->db, $this->driver)->table($prefix . 'clients'));
+    }
+
     public function test_two_histories_in_one_database_keep_apart(): void
     {
         $this->v1();

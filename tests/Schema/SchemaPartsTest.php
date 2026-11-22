@@ -256,6 +256,34 @@ final class SchemaPartsTest extends TestCase
 
     // ── snapshot clean ──────────────────────────────────────────────────────
 
+    public function test_clean_removes_a_recorded_attribute_on_a_class_and_only_there(): void
+    {
+        $src = <<<'PHP'
+            <?php
+            use Flytachi\Winter\Ppa\Mapping\Attributes\Entity\Table;
+            use Flytachi\Winter\Ppa\Mapping\Attributes\Migration\RenamedFrom;
+
+            #[Table]
+            #[RenamedFrom('customers')]
+            final class Client
+            {
+                #[RenamedFrom('mail')]
+                public string $email = '';
+            }
+
+            #[Table, RenamedFrom('order')]
+            class Order {}
+            PHP;
+
+        $out = RenamedFromCleaner::clean($src, ['@Client']);
+
+        self::assertSame(1, $out['removed']);
+        self::assertStringNotContainsString("RenamedFrom('customers')", $out['source']);
+        self::assertStringContainsString("#[RenamedFrom('mail')]", $out['source'], 'the property keeps its own');
+        self::assertStringContainsString("#[Table, RenamedFrom('order')]", $out['source'], 'another class keeps its own');
+        self::assertSame(1, RenamedFromCleaner::clean($out['source'], ['@Order'])['removed']);
+    }
+
     public function test_clean_removes_a_recorded_attribute_on_its_own_line_and_its_use(): void
     {
         $src = <<<'PHP'

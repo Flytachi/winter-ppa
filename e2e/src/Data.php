@@ -26,15 +26,19 @@ final class Data
     public const int AUDIT = 30;
     public const int AUDIT_VALID_REFS = 10;   // a third points at a user, a third at none (99999), a third NULL
 
-    /** @return array<string, int> table => rows, what stays true through stage 3 */
-    public static function counts(): array
+    /**
+     * @param int $version The version the database is at: V021 renames two tables.
+     * @return array<string, int> table => rows, what stays true through stage 3
+     */
+    public static function counts(int $version): array
     {
+        $renamed = $version >= 21;
         return [
             'public.users' => self::USERS,
-            'shop.products' => self::PRODUCTS,
+            $renamed ? 'shop.goods' : 'shop.products' => self::PRODUCTS,
             'public.orders' => self::ORDERS,
             'public.order_items' => self::ITEMS,
-            'public.audit_log' => self::AUDIT,
+            $renamed ? 'shop.audit_events' : 'public.audit_log' => self::AUDIT,
         ];
     }
 

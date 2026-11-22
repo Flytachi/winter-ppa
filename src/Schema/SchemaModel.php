@@ -48,15 +48,17 @@ final class SchemaModel
      * @param iterable<Table> $tables The tables {@see \Flytachi\Winter\Ppa\PPAMapping::declarationFrom()} maps.
      * @param iterable<Extension> $extensions The config's `#[Extension]`s (PostgreSQL).
      * @return array{model: array, renamed: array<string, array<string, string>>, entities: array<string, string>,
-     *     schemas: list<string>, extensions: array<string, string>}
+     *     schemas: list<string>, extensions: array<string, string>, renamedTables: array<string, string>}
      *     `renamed`: table => column => its name in the last snapshot (#[RenamedFrom]);
      *     `entities`: table => the entity class; `schemas`: the PostgreSQL schemas the tables
-     *     live in but `public`; `extensions`: name => its CREATE EXTENSION.
+     *     live in but `public`; `extensions`: name => its CREATE EXTENSION; `renamedTables`:
+     *     table => its name in the last snapshot (#[RenamedFrom] on the entity class).
      */
     public static function declared(iterable $tables, string $driver, iterable $extensions = []): array
     {
         $schemas = [];
         $ext = [];
+        $renamedTables = [];
         if ($driver === 'pgsql') {
             foreach ($extensions as $e) {
                 $ext[$e->name] = rtrim($e->toSql('pgsql'), ';');
@@ -81,6 +83,12 @@ final class SchemaModel
             if ($table->entity !== null) {
                 $entities[$name] = $table->entity;
             }
+            if ($table->renamedFrom !== null && $table->renamedFrom !== '') {
+                // A name without a schema is in the schema the table is in now.
+                $renamedTables[$name] = str_contains($table->renamedFrom, '.') || $table->schema === null
+                    ? $table->renamedFrom
+                    : "{$table->schema}.{$table->renamedFrom}";
+            }
             foreach ($table->columns as $column) {
                 if ($column->renamedFrom !== null) {
                     $renamed[$name][$column->name] = $column->renamedFrom;
@@ -94,6 +102,7 @@ final class SchemaModel
             'entities' => $entities,
             'schemas' => array_values($schemas),
             'extensions' => $ext,
+            'renamedTables' => $renamedTables,
         ];
     }
 
@@ -164,6 +173,9 @@ final class SchemaModel
         $op = $change['op'] ?? '';
         if ($op === 'createSchema' || $op === 'createExtension' || $op === 'dropExtension') {
             return $model;          // not a table: see objects()
+        }
+        if ($op === 'renameTable') {
+            return self::renameTable($model, $change);
         }
         $t = $change['table'] ?? null;
         if ($op !== 'createTable' && !isset($model[$t])) {
@@ -276,6 +288,87 @@ final class SchemaModel
             }
         }
         return ['schemas' => array_values($schemas), 'extensions' => $extensions];
+    }
+
+    /**
+     * A table under its new name: the indexes and constraints the change pairs renamed (their
+     * statements on the new name), the others as they were — the diff remakes them; the
+     * foreign keys of other tables pointing at it point at the new name, as the server does.
+     */
+    private static function renameTable(array $model, array $c): array
+    {
+        [$from, $to] = [$c['from'], $c['to']];
+        if (!isset($model[$from])) {
+            throw new SchemaException("renameTable: table {$from} is not in the model.");
+        }
+        if (isset($model[$to])) {
+            throw new SchemaException("renameTable: {$to} is already in the model.");
+        }
+        $t = $model[$from];
+        $indexes = [];
+        foreach ($t['indexes'] as $name => $sql) {
+            $new = $c['indexes'][$name] ?? null;
+            $new === null ? $indexes[$name] = $sql : $indexes[$new] = self::renamedSql($sql, $from, $to, $name, $new);
+        }
+        $constraints = [];
+        foreach ($t['constraints'] as $name => $k) {
+            $new = $c['constraints'][$name] ?? null;
+            $new === null
+                ? $constraints[$name] = $k
+                : $constraints[$new] = [
+                    'kind' => $k['kind'],
+                    'sql' => self::renamedSql($k['sql'], $from, $to, $name, $new),
+                ];
+        }
+        ksort($indexes);
+        ksort($constraints);
+        $t['indexes'] = $indexes;
+        $t['constraints'] = $constraints;
+        $out = [];
+        foreach ($model as $name => $table) {
+            $out[$name === $from ? $to : $name] = $name === $from ? $t : $table;
+        }
+        foreach ($out as $name => $table) {
+            foreach ($table['constraints'] as $cn => $k) {
+                if ($k['kind'] === 'foreign') {
+                    $out[$name]['constraints'][$cn]['sql'] = self::referencesRenamed($k['sql'], $from, $to);
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * A statement of the table `$from` as the same one of `$to`: the table it is on, and the
+     * index's or constraint's name (`$oldName` → `$newName`).
+     */
+    public static function renamedSql(string $sql, string $from, string $to, ?string $oldName, ?string $newName): string
+    {
+        $sql = (string) preg_replace('/(?<![\w.])' . preg_quote($from, '/') . '(?![\w])/', $to, $sql);
+        if ($oldName !== null && $newName !== null && $oldName !== $newName) {
+            $sql = (string) preg_replace('/(?<![\w])' . preg_quote($oldName, '/') . '(?![\w])/', $newName, $sql, 1);
+        }
+        return $sql;
+    }
+
+    /** `REFERENCES <from>(…)` → `REFERENCES <to>(…)` — and the short name when the schema stays. */
+    private static function referencesRenamed(string $sql, string $from, string $to): string
+    {
+        $at = fn(string $t) => '/\bREFERENCES\s+' . preg_quote($t, '/') . '\s*\(/i';
+        $sql = (string) preg_replace($at($from), "REFERENCES {$to}(", $sql);
+        $f = self::splitName($from);
+        $t = self::splitName($to);
+        if ($f[0] === $t[0]) {
+            $sql = (string) preg_replace($at($f[1]), "REFERENCES {$t[1]}(", $sql);
+        }
+        return $sql;
+    }
+
+    /** @return array{?string, string} schema (null: none given), table */
+    public static function splitName(string $table): array
+    {
+        $dot = strrpos($table, '.');
+        return $dot === false ? [null, $table] : [substr($table, 0, $dot), substr($table, $dot + 1)];
     }
 
     /** The model without what only the history keeps: a detached column is no column of it. */

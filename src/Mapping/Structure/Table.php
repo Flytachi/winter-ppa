@@ -15,6 +15,9 @@ final class Table implements StructureInterface
     /** @var ForeignKey[] */
     public array $foreignKeys;
 
+    /** Its name in the last snapshot, from #[RenamedFrom] on the entity class — for schema snapshots. */
+    public ?string $renamedFrom = null;
+
     /** The entity class the table was mapped from, when it was — for schema snapshots. */
     public ?string $entity = null;
 

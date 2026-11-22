@@ -79,6 +79,25 @@ final readonly class State
         return new self($tables, $this->extensions);
     }
 
+    /**
+     * The table under another name — and in another schema when given — its class and
+     * repository as they are; `$attr` (a #[RenamedFrom]) put on the class.
+     */
+    public function retable(string $from, string $to, ?string $schema, ?string $attr): self
+    {
+        $tables = [];
+        foreach ($this->tables as $name => $t) {
+            if ($name === $from) {
+                $t['schema'] = $schema;
+                $t['attrs'] = $attr === null ? $t['attrs'] : [...$t['attrs'], $attr];
+                $tables[$to] = $t;
+            } else {
+                $tables[$name] = $t;
+            }
+        }
+        return new self($tables, $this->extensions);
+    }
+
     public function withoutTable(string $table): self
     {
         $tables = $this->tables;

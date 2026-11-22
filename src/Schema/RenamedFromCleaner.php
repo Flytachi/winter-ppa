@@ -21,7 +21,8 @@ final class RenamedFromCleaner
     }
 
     /**
-     * @param list<string> $properties The properties whose #[RenamedFrom] goes.
+     * @param list<string> $properties The properties whose #[RenamedFrom] goes; `@<Class>` for the
+     *     one on a class (a table renamed).
      * @return array{source: string, removed: int}
      */
     public static function clean(string $source, array $properties): array
@@ -88,6 +89,14 @@ final class RenamedFromCleaner
         for ($k = $from + 1; $k < $count; $k++) {
             if ($tokens[$k]->id === T_VARIABLE) {
                 return substr($tokens[$k]->text, 1);
+            }
+            if ($tokens[$k]->id === T_CLASS) {
+                for ($n = $k + 1; $n < $count; $n++) {
+                    if ($tokens[$n]->id === T_STRING) {
+                        return '@' . $tokens[$n]->text;
+                    }
+                }
+                return null;
             }
             if (in_array($tokens[$k]->text, ['(', '{', ';'], true) || $tokens[$k]->id === T_FUNCTION) {
                 return null;                           // the attribute is on something else

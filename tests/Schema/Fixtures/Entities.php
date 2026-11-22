@@ -193,3 +193,46 @@ class OrderBadRename
     #[Decimal(10, 2)]
     public string $total = '0';
 }
+
+// customers renamed: CustomerV2 under another name — its unique index and its key follow it.
+#[Table]
+#[RenamedFrom('customers')]
+class ClientRenamed
+{
+    #[Id]
+    public ?int $id = null;
+
+    #[Varchar(120)]
+    public string $name = '';
+
+    #[Varchar(255)]
+    #[Unique]
+    public string $email = '';
+}
+
+// OrderV3 with its key on the renamed table.
+#[Table]
+class OrderV3Clients
+{
+    #[BigId]
+    public ?int $id = null;
+
+    #[Varchar(120)]
+    public string $customer = '';
+
+    #[Text]
+    public ?string $comment = null;
+
+    #[Decimal(12, 2)]
+    #[Check('total >= 0')]
+    public string $total = '0';
+
+    #[Varchar(20)]
+    #[DefaultVal("'new'")]
+    #[Index]
+    public string $status = 'new';
+
+    #[Integer]
+    #[ForeignKey('clients', 'id', onDelete: FKAction::CASCADE)]
+    public ?int $customer_id = null;
+}

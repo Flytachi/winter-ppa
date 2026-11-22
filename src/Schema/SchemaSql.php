@@ -34,6 +34,9 @@ final class SchemaSql
         if ($c['op'] === 'createExtension') {
             return [$c['sql']];
         }
+        if ($c['op'] === 'renameTable') {
+            return self::renameTable($c, $driver);
+        }
         if ($c['op'] === 'dropExtension') {
             // No CASCADE: what still uses it fails the version instead of going with it.
             return ["DROP EXTENSION IF EXISTS \"{$c['name']}\""];
@@ -224,6 +227,75 @@ final class SchemaSql
         }
         $sql[] = "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = '{$t}'::regclass"
             . " AND conname = '{$old}') THEN ALTER TABLE {$t} RENAME CONSTRAINT {$old} TO {$new}; END IF; END \$\$";
+        return $sql;
+    }
+
+    /**
+     * The table renamed — or moved to another schema — with what is named after it renamed
+     * too, so that it is named as a fresh database names it: the indexes and constraints the
+     * change pairs, and on PostgreSQL what the server names itself — the primary key
+     * (`<table>_pkey`), the NOT NULL constraints of 18 (`<table>_<column>_not_null`), the
+     * sequences of the identities (`<table>_<column>_seq`).
+     *
+     * @return list<string>
+     */
+    private static function renameTable(array $c, string $driver): array
+    {
+        [$fromSchema, $fromName] = SchemaModel::splitName($c['from']);
+        [$toSchema, $toName] = SchemaModel::splitName($c['to']);
+        $to = $c['to'];
+        if ($driver === 'mysql') {
+            $sql = ["RENAME TABLE {$c['from']} TO {$to}"];
+            foreach ($c['indexes'] ?? [] as $old => $new) {
+                if ($old !== $new) {
+                    $sql[] = "ALTER TABLE {$to} RENAME INDEX {$old} TO {$new}";
+                }
+            }
+            return $sql;
+        }
+        if ($driver === 'sqlite') {
+            if ($fromSchema !== $toSchema) {
+                throw new SchemaException("{$c['from']}: SQLite has no schema to move a table to.");
+            }
+            return ["ALTER TABLE {$c['from']} RENAME TO {$toName}"];
+        }
+        $sql = [];
+        $current = $c['from'];
+        if ($fromSchema !== $toSchema && $toSchema !== null) {
+            $sql[] = "ALTER TABLE {$current} SET SCHEMA {$toSchema}";
+            $current = "{$toSchema}.{$fromName}";
+        }
+        if ($fromName !== $toName) {
+            $sql[] = "ALTER TABLE {$current} RENAME TO {$toName}";
+        }
+        $in = $toSchema !== null ? "{$toSchema}." : '';
+        foreach ($c['indexes'] ?? [] as $old => $new) {
+            if ($old !== $new) {
+                $sql[] = "ALTER INDEX {$in}{$old} RENAME TO {$new}";
+            }
+        }
+        foreach ($c['constraints'] ?? [] as $old => $new) {
+            if ($old !== $new) {
+                $sql[] = "ALTER TABLE {$to} RENAME CONSTRAINT {$old} TO {$new}";
+            }
+        }
+        if ($fromName !== $toName) {
+            $o = $fromName;
+            $n = $toName;
+            $sql[] = "DO \$\$ DECLARE r record; BEGIN"
+                . " IF EXISTS (SELECT 1 FROM pg_constraint"
+                . " WHERE conrelid = '{$to}'::regclass AND conname = '{$o}_pkey')"
+                . " THEN ALTER TABLE {$to} RENAME CONSTRAINT {$o}_pkey TO {$n}_pkey; END IF;"
+                . " FOR r IN SELECT conname FROM pg_constraint WHERE conrelid = '{$to}'::regclass AND contype = 'n'"
+                . " AND left(conname, " . (strlen($o) + 1) . ") = '{$o}_' AND right(conname, 9) = '_not_null' LOOP"
+                . " EXECUTE format('ALTER TABLE {$to} RENAME CONSTRAINT %I TO %I', r.conname,"
+                . " '{$n}' || substr(r.conname, " . (strlen($o) + 1) . ")); END LOOP;"
+                . " FOR r IN SELECT a.attname, pg_get_serial_sequence('{$to}', a.attname) AS seq FROM pg_attribute a"
+                . " WHERE a.attrelid = '{$to}'::regclass AND a.attnum > 0 AND NOT a.attisdropped LOOP"
+                . " IF r.seq IS NOT NULL AND substring(r.seq from '[^.]+$') = '{$o}_' || r.attname || '_seq' THEN"
+                . " EXECUTE format('ALTER SEQUENCE %s RENAME TO %I', r.seq, '{$n}_' || r.attname || '_seq');"
+                . " END IF; END LOOP; END \$\$";
+        }
         return $sql;
     }
 

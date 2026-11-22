@@ -102,7 +102,9 @@ B-tree has the method in its name (`orders_note_gin_idx`).
 
 It never guesses; each refusal names what to write.
 
-- a column gone and another new → a rename only with `#[RenamedFrom('old')]`;
+- a column gone and another new → a rename only with `#[RenamedFrom('old')]`; a table the same,
+  with the attribute on its entity class (`renameTable`, first in its version; what is named after
+  the table renamed with it — paired by definition — so an upgraded database names it as a fresh one);
 - `#[RenamedFrom('x')]` whose `x` is not a column of the last version, or is also declared → error;
   one already recorded (`renameColumn` in a version) → a notice, and `stale` for `snapshot clean`;
 - a column or table gone → `--drop`, or `--keep` (the column stays in the database, `detached` in

@@ -70,6 +70,9 @@ final class SchemaInspector
         if ($c['op'] === 'createExtension') {
             return $this->exists('SELECT 1 FROM pg_extension WHERE extname = ?', $c['name']);
         }
+        if ($c['op'] === 'renameTable') {
+            return $this->table($c['to']) !== null && $this->table($c['from']) === null;
+        }
         if ($c['op'] === 'dropExtension') {
             return !$this->exists('SELECT 1 FROM pg_extension WHERE extname = ?', $c['name']);
         }

@@ -97,7 +97,7 @@ final class Runner
                 $this->matchesModel($dir);
                 ($step->check)?->__invoke($this->db, $n > Scenario::STAGE_1);
                 if ($n > Scenario::STAGE_1) {
-                    $this->counts();
+                    $this->counts($n);
                 }
                 return self::summary($diff) . ' · ' . $done[0]['action'];
             });
@@ -105,8 +105,8 @@ final class Runner
                 Out::stage(2);
                 $this->check('data', function (): string {
                     Data::fill($this->db);
-                    $this->counts();
-                    return array_sum(Data::counts()) + Data::GROUPS . ' rows';
+                    $this->counts(Scenario::STAGE_1);
+                    return array_sum(Data::counts(Scenario::STAGE_1)) + Data::GROUPS . ' rows';
                 });
             }
         }
@@ -146,7 +146,7 @@ final class Runner
                 $this->matchesModel($dir);
                 if ($r > 0) {
                     ($this->steps[$to - 1]->check)?->__invoke($this->db, true);
-                    $this->counts();
+                    $this->counts($to);
                 }
                 return implode(' ', array_unique(array_column($done, 'action')));
             });
@@ -168,14 +168,17 @@ final class Runner
         Out::stage('snapshot');
         $refused = [
             ['a column gone, no --drop', $last->without('users', 'locale'), '/users\.locale is gone from the entity/'],
-            ['a table gone, no --drop', $last->withoutTable('audit_log'), '/audit_log has no entity any more/'],
+            ['a table gone, no --drop', $last->withoutTable('audit_events'), '/audit_events has no entity any more/'],
+            ['a table renamed without #[RenamedFrom]', $last->retable('labels', 'tags', null, null), '/public\.labels has no entity any more/'],
+            ['#[RenamedFrom] of no table', $last->table('labels', ['attrs' => ["#[RenamedFrom('nope')]"]]), '/`public\.nope` is not a table of the last snapshot/'],
+            ['#[RenamedFrom] of a table declared too', $last->table('labels', ['attrs' => ["#[RenamedFrom('users')]"]]), '/`public\.users` is a table of the entities too/'],
             ['a rename without #[RenamedFrom]', $last->renamed('users', 'email', 'mail', ['#[Varchar(160)]', '#[Unique]'], "string \$mail = ''"), '/users\.email is gone from the entity/'],
             ['#[RenamedFrom] of no column', $last->with('users', 'nick', ['#[Varchar(20)]', "#[RenamedFrom('nope')]"], '?string $nick = null'), '/`nope` is not a column of the last snapshot/'],
             ['NOT NULL without a default', $last->with('users', 'code', ['#[Varchar(8)]'], 'string $code'), '/users\.code is NOT NULL with no default/'],
             ['a narrowing, not custom', $last->attrs('users', 'name', fn($a) => Scenario::swap($a, '#[Varchar(200)]', '#[Varchar(50)]')), '/users\.name/'],
-            ['a primary key changed, not custom', $last->attrs('audit_log', 'happened', fn($a) => Scenario::swap($a, '#[Primary]', null)), '/primary key changes/'],
+            ['a primary key changed, not custom', $last->attrs('audit_events', 'happened', fn($a) => Scenario::swap($a, '#[Primary]', null)), '/primary key changes/'],
             ['a unique HASH index', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Unique(method: IndexMethod::HASH)]']), '/a unique index is a B-tree/'],
-            ['an extension dropped without --drop', $last->withoutExtension('btree_gist')->attrs('audit_log', 'level', fn($a) => Scenario::swap($a, '#[Index(method: IndexMethod::GIST)]', null)), null],
+            ['an extension dropped without --drop', $last->withoutExtension('btree_gist')->attrs('audit_events', 'level', fn($a) => Scenario::swap($a, '#[Index(method: IndexMethod::GIST)]', null)), null],
             ['GIN on a VARCHAR', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index(method: IndexMethod::GIN)]']), '/no GIN operator class for locale/'],
             ['HASH of two columns', $last->attrs('users', 'locale', fn($a) => [...$a, "#[Index(['email'], method: IndexMethod::HASH)]"]), '/a HASH index has one column/'],
             ['trigrams without pg_trgm', $last->withoutExtension('pg_trgm'), '/comes with the extension pg_trgm/'],
@@ -329,9 +332,9 @@ final class Runner
         expect($differences === [], 'the database differs from the model: ' . implode('; ', $differences));
     }
 
-    private function counts(): void
+    private function counts(int $version): void
     {
-        foreach (Data::counts() as $table => $rows) {
+        foreach (Data::counts($version) as $table => $rows) {
             $has = (int) one($this->db, "SELECT count(*) FROM {$table}");
             expect($has === $rows, "{$table}: {$rows} rows expected, {$has} there");
         }

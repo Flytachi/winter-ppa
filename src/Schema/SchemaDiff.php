@@ -21,7 +21,7 @@ namespace Flytachi\Winter\Ppa\Schema;
 final class SchemaDiff
 {
     private const array ORDER = [
-        'createSchema' => -2, 'createExtension' => -1, 'dropConstraint' => 0, 'dropIndex' => 1,
+        'createSchema' => -3, 'createExtension' => -2, 'renameTable' => -1, 'dropConstraint' => 0, 'dropIndex' => 1,
         'renameColumn' => 2, 'createTable' => 3, 'addColumn' => 4, 'alterColumn' => 5, 'setPrimaryKey' => 6,
         'detachColumn' => 7, 'dropColumn' => 8, 'dropTable' => 9, 'addIndex' => 10, 'addConstraint' => 11,
         'dropExtension' => 12,
@@ -59,9 +59,11 @@ final class SchemaDiff
         array $keep = [],
         bool $custom = false,
         array $objects = [],
+        ?string $driver = null,
     ): self {
         $d = new self();
         $d->objects($objects, $declared, $drop);
+        $history = $d->renamedTables($history, $declared, $versions, $driver);
         $to = $declared['model'];
         foreach ($to as $table => $want) {
             if (!isset($history[$table])) {
@@ -141,6 +143,110 @@ final class SchemaDiff
                     . "(--drop=extension:{$name} drops it).";
             }
         }
+    }
+
+    /**
+     * #[RenamedFrom] on an entity class: the table renamed (or moved to another schema) before
+     * anything else of the version, with the indexes and constraints named after it — paired
+     * by their definition with what the entities declare, and renamed where the server can:
+     * indexes on PostgreSQL and MySQL, constraints on PostgreSQL. What is not paired the diff
+     * remakes.
+     *
+     * @return array The history with the renames in it.
+     */
+    private function renamedTables(array $history, array $declared, array $versions, ?string $driver): array
+    {
+        foreach ($declared['renamedTables'] ?? [] as $to => $from) {
+            $entity = $declared['entities'][$to] ?? null;
+            $who = $entity ?? $to;
+            $property = '@' . ($entity !== null ? substr($entity, (int) strrpos('\\' . $entity, '\\')) : $to);
+            $fromDeclared = isset($declared['model'][$from]);
+            if (isset($history[$from]) && !isset($history[$to]) && !$fromDeclared) {
+                $want = $declared['model'][$to];
+                $change = [
+                    'op' => 'renameTable',
+                    'from' => $from,
+                    'to' => $to,
+                    'indexes' => $driver === 'sqlite'
+                        ? []
+                        : self::pairs($history[$from]['indexes'], $want['indexes'], $from, $to),
+                    'constraints' => $driver === null || $driver === 'pgsql'
+                        ? self::pairs(
+                            array_map(fn(array $c) => $c['sql'], $history[$from]['constraints']),
+                            array_map(fn(array $c) => $c['sql'], $want['constraints']),
+                            $from,
+                            $to,
+                        )
+                        : [],
+                ];
+                $this->changes[] = $change;
+                $this->needed[] = ['entity' => $entity, 'property' => $property];
+                $history = SchemaModel::apply($history, $change);
+            } elseif (
+                !isset($history[$from]) && isset($history[$to]) && !$fromDeclared
+                && ($at = self::tableRecordedIn($versions, $from, $to)) !== null
+            ) {
+                $this->notices[] = "{$who} — #[RenamedFrom('{$from}')] is already recorded in {$at}: "
+                    . 'it can be removed (`call db snapshot clean`).';
+                $this->stale[] = [
+                    'entity' => $entity, 'table' => $to, 'property' => $property, 'from' => $from, 'version' => $at,
+                ];
+            } else {
+                $this->needed[] = ['entity' => $entity, 'property' => $property];
+                $this->errors[] = "{$who} — #[RenamedFrom('{$from}')]: "
+                    . ($fromDeclared
+                        ? "`{$from}` is a table of the entities too."
+                        : (!isset($history[$from])
+                            ? "`{$from}` is not a table of the last snapshot."
+                            : "{$to} is in the last snapshot already."))
+                    . ' Remove the attribute.';
+            }
+        }
+        return $history;
+    }
+
+    /**
+     * Old name => new name: an index or constraint of the table and one the entities declare
+     * that say the same once the table's name and their own are left out.
+     *
+     * @param array<string, string> $have name => statement
+     * @param array<string, string> $want name => statement
+     * @return array<string, string>
+     */
+    private static function pairs(array $have, array $want, string $from, string $to): array
+    {
+        $strip = fn(string $sql, string $name) => (string) preg_replace(
+            '/(?<![\w])' . preg_quote($name, '/') . '(?![\w])/',
+            '#',
+            $sql,
+            1,
+        );
+        $pairs = [];
+        $taken = [];
+        foreach ($have as $old => $sql) {
+            $mine = $strip(SchemaModel::renamedSql($sql, $from, $to, null, null), $old);
+            foreach ($want as $new => $theirs) {
+                if (!isset($taken[$new]) && $strip($theirs, $new) === $mine) {
+                    $pairs[$old] = $new;
+                    $taken[$new] = true;
+                    break;
+                }
+            }
+        }
+        return $pairs;
+    }
+
+    /** @param list<SchemaVersionFile> $versions */
+    private static function tableRecordedIn(array $versions, string $from, string $to): ?string
+    {
+        foreach ($versions as $v) {
+            foreach ($v->changes as $c) {
+                if (($c['op'] ?? '') === 'renameTable' && $c['from'] === $from && $c['to'] === $to) {
+                    return $v->version;
+                }
+            }
+        }
+        return null;
     }
 
     public function isEmpty(): bool

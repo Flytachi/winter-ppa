@@ -237,6 +237,66 @@ final class SchemaDiffTest extends TestCase
         self::assertSame('App\\Config\\MariaDb\\V002_Fill', $code[1]::class);
     }
 
+    public function test_a_table_renamed_by_its_class_is_one_change_with_its_names(): void
+    {
+        $this->record(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class]);
+
+        $diff = $this->diff(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV3Clients::class]);
+
+        self::assertSame([], $diff->errors);
+        self::assertSame(['op' => 'renameTable', 'from' => 'customers', 'to' => 'clients', 'indexes' => ['customers_email_udx' => 'clients_email_udx'], 'constraints' => []], $diff->changes[0]);
+        // orders' key on customers follows the table: the model rewrites REFERENCES, nothing to remake.
+        self::assertSame(['renameTable'], array_column($diff->changes, 'op'));
+
+        SchemaSnapshot::write($this->history, $diff, 'pgsql');
+        $again = $this->diff(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV3Clients::class]);
+        self::assertTrue($again->isEmpty());
+        self::assertStringContainsString("#[RenamedFrom('customers')] is already recorded in V002", $again->notices[0]);
+        self::assertSame('@ClientRenamed', $again->stale[0]['property']);
+    }
+
+    public function test_renamed_from_a_table_that_is_not_there_is_an_error(): void
+    {
+        $this->record(['orders' => F\OrderV1::class]);
+
+        $diff = $this->diff(['clients' => F\ClientRenamed::class, 'orders' => F\OrderV1::class]);
+
+        self::assertStringContainsString("#[RenamedFrom('customers')]: `customers` is not a table of the last snapshot", implode("\n", $diff->errors));
+    }
+
+    /** @return iterable<string, array{string, list<string>}> */
+    public static function renameTableSql(): iterable
+    {
+        $c = ['op' => 'renameTable', 'from' => 'public.order', 'to' => 'shop.orders', 'indexes' => ['order_note_idx' => 'orders_note_idx', 'x_idx' => 'x_idx'], 'constraints' => ['fk_order_user_id' => 'fk_orders_user_id']];
+        yield 'mysql' => ['mysql', ['RENAME TABLE public.order TO shop.orders', 'ALTER TABLE shop.orders RENAME INDEX order_note_idx TO orders_note_idx']];
+        yield 'pgsql' => ['pgsql', [
+            'ALTER TABLE public.order SET SCHEMA shop',
+            'ALTER TABLE shop.order RENAME TO orders',
+            'ALTER INDEX shop.order_note_idx RENAME TO orders_note_idx',
+            'ALTER TABLE shop.orders RENAME CONSTRAINT fk_order_user_id TO fk_orders_user_id',
+        ]];
+    }
+
+    #[DataProvider('renameTableSql')]
+    public function test_a_table_rename_per_driver(string $driver, array $first): void
+    {
+        $c = ['op' => 'renameTable', 'from' => 'public.order', 'to' => 'shop.orders', 'indexes' => ['order_note_idx' => 'orders_note_idx', 'x_idx' => 'x_idx'], 'constraints' => ['fk_order_user_id' => 'fk_orders_user_id']];
+        $sql = \Flytachi\Winter\Ppa\Schema\SchemaSql::change($c, $driver);
+
+        self::assertSame($first, array_slice($sql, 0, count($first)));
+        if ($driver === 'pgsql') {
+            self::assertStringStartsWith('DO $$', end($sql), 'the primary key, NOT NULL and sequences the server named');
+            self::assertStringContainsString('order_pkey TO orders_pkey', end($sql));
+        }
+    }
+
+    public function test_sqlite_renames_a_table_but_moves_it_nowhere(): void
+    {
+        self::assertSame(['ALTER TABLE order RENAME TO orders'], \Flytachi\Winter\Ppa\Schema\SchemaSql::change(['op' => 'renameTable', 'from' => 'order', 'to' => 'orders'], 'sqlite'));
+        $this->expectExceptionMessageMatches('/SQLite has no schema to move a table to/');
+        \Flytachi\Winter\Ppa\Schema\SchemaSql::change(['op' => 'renameTable', 'from' => 'a.order', 'to' => 'b.order'], 'sqlite');
+    }
+
     public function test_a_default_name_says_what_the_version_does(): void
     {
         self::assertSame('create_orders', SchemaSnapshot::defaultName([['op' => 'createTable', 'table' => 'public.orders']]));
