@@ -217,15 +217,16 @@ final class Runner
                 unlink($f);
             }
         });
-        $this->refusedMigration('a version that arrived late', '/V010_\w+ is older than V022.*arrived late/', function (): void {
+        $this->refusedMigration('a version that arrived late', '/V010_\w+ is older than ' . self::v(count($this->steps)) . '.*arrived late/', function (): void {
             $this->db->exec("DELETE FROM public.winter_ppa_schema_history WHERE version = 'V010'");
         });
         $this->refusedMigration('a version of another driver', '/recorded for mysql, the database is pgsql/', function (SchemaDirectory $d): void {
-            file_put_contents($d->path . '/V023_other.json', json_encode(['version' => 'V023', 'name' => 'other', 'driver' => 'mysql', 'changes' => []]));
+            $next = self::v(count($this->steps) + 1);
+            file_put_contents($d->path . "/{$next}_other.json", json_encode(['version' => $next, 'name' => 'other', 'driver' => 'mysql', 'changes' => []]));
         });
 
         $flag = $last->with('users', 'flag', ['#[Boolean]'], 'bool $flag = false');
-        $this->failingVersion('code that throws: the version rolled back', new Step(4, 'flag', $flag, '', custom: true, after: "throw new \\RuntimeException('no luck');"), '/V023_flag failed and was rolled back: no luck/');
+        $this->failingVersion('code that throws: the version rolled back', new Step(4, 'flag', $flag, '', custom: true, after: "throw new \\RuntimeException('no luck');"), '/' . self::v(count($this->steps) + 1) . '_flag failed and was rolled back: no luck/');
         $narrow = $last->attrs('users', 'locale', fn($a) => ['#[Varchar(5)]']);
         $this->failingVersion('code that leaves the database wrong', new Step(4, 'narrow_locale', $narrow, '', custom: true), '/differs from its model.*users\.locale/s');
     }
@@ -283,6 +284,12 @@ final class Runner
         return $this->loaded[$key];
     }
 
+    /** 23 → "V023". */
+    private static function v(int $n): string
+    {
+        return sprintf('V%03d', $n);
+    }
+
     private static function fillCode(string $file, Step $step): void
     {
         $php = (string) file_get_contents($file);
@@ -293,6 +300,11 @@ final class Runner
             $empty = "public function {$method}(CDO \$db): void\n    {\n    }";
             expect(str_contains($php, $empty), "the skeleton has no empty {$method}()");
             $php = str_replace($empty, "public function {$method}(CDO \$db): void\n    {\n        {$body}\n    }", $php);
+        }
+        if ($step->props !== null) {
+            $first = '    public function before(CDO $db): void';
+            expect(substr_count($php, $first) === 1, 'the skeleton has no before()');
+            $php = str_replace($first, "    {$step->props}\n\n{$first}", $php);
         }
         file_put_contents($file, $php);
     }
@@ -320,7 +332,7 @@ final class Runner
             $this->snapshot($dir, $step, $full + 1, 'F_' . $step->name);
             $this->expectThrows(fn() => $this->migrator($dir)->migrate(), $why);
             expect(Db::dump($this->db) === $schema, 'the schema changed: the version was not rolled back');
-            expect(one($this->db, 'SELECT count(*) FROM public.winter_ppa_schema_history WHERE version = \'V023\'') == 0, 'the failed version is in the history');
+            expect(one($this->db, "SELECT count(*) FROM public.winter_ppa_schema_history WHERE version = '" . self::v($full + 1) . "'") == 0, 'the failed version is in the history');
             return 'rolled back';
         }, stop: false);
     }

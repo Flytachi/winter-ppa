@@ -10,7 +10,7 @@ namespace Flytachi\Winter\Ppa\E2e;
  * Stage 1 (V001–V005): six tables with every attribute, then a column added, renamed,
  * dropped — and back to the first shape in one version.
  * Stage 2: data ({@see Data}).
- * Stage 3 (V006–V022), on tables full of rows: every parameter of every index, foreign key,
+ * Stage 3 (V006–V023), on tables full of rows: every parameter of every index, foreign key,
  * check and id attribute made, changed, renamed, moved and dropped; extensions added (with
  * version, schema, cascade) and dropped; types widened and narrowed; NOT NULL over NULLs; a
  * unique index over duplicates; a primary key changed; tables made and dropped; code-only
@@ -350,6 +350,30 @@ final class Scenario
                 expect(one($db, 'SELECT sum(quantity) FROM shop.goods') == Data::STOCK_SUM, 'the stock is in quantity');
             }
         });
+
+        // V023 — before() and after() of one version, one instance: the notes read on the old
+        // schema, kept in the instance while the steps move them (a table made, the column
+        // dropped), written to the new table by after(). The column is gone by then — only
+        // what before() kept has them.
+        $s = self::clean($s)->without('orders', 'note')->table('order_notes', [
+            'class' => 'OrderNote', 'repo' => 'OrderNoteRepo', 'schema' => null, 'attrs' => [],
+            'props' => [
+                'id' => [['#[BigId]'], '?int $id = null'],
+                'order_id' => [['#[BigInteger]', '#[ForeignRepo(OrderRepo::class, onDelete: FKAction::CASCADE)]'], 'int $order_id'],
+                'body' => [['#[Text]'], "string \$body = ''"],
+            ],
+        ]);
+        $steps[] = new Step(3, 'notes_moved', $s, 'before() and after() of one version hand rows over: the notes read before the column is dropped, written to a new table after', drop: ['public.orders.note'], custom: true, expect: ['createTable' => 1, 'dropColumn' => 1],
+            props: 'private array $notes = [];',
+            before: "\$this->notes = \$db->query(\"SELECT id, note FROM public.orders WHERE note <> '' ORDER BY id\")->fetchAll(\\PDO::FETCH_KEY_PAIR);",
+            after: "\$add = \$db->prepare('INSERT INTO public.order_notes (order_id, body) VALUES (?, ?)'); foreach (\$this->notes as \$id => \$note) { \$add->execute([\$id, \$note]); }",
+            check: static function (\PDO $db, bool $data): void {
+                expect(one($db, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'note'") == 0, 'orders.note is gone');
+                if ($data) {
+                    expect(one($db, 'SELECT count(*) FROM public.order_notes') == Data::ORDERS - Data::ORDERS_WITHOUT_NOTE, 'every note handed over from before() to after()');
+                    expect(one($db, "SELECT string_agg(body, ',' ORDER BY order_id) FROM public.order_notes WHERE order_id IN (1, 2, 3, 4)") === 'note 1,note 2,note 4', 'each note at its order');
+                }
+            });
 
         return $steps;
     }
