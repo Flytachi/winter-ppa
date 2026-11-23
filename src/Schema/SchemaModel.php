@@ -59,6 +59,7 @@ final class SchemaModel
         $schemas = [];
         $ext = [];
         $renamedTables = [];
+        $renamedBare = [];
         $unresolved = [];
         if ($driver === 'pgsql') {
             foreach ($extensions as $e) {
@@ -94,10 +95,14 @@ final class SchemaModel
                 }
             }
             if ($table->renamedFrom !== null && $table->renamedFrom !== '') {
-                // A name without a schema is in the schema the table is in now.
-                $renamedTables[$name] = str_contains($table->renamedFrom, '.') || $table->schema === null
-                    ? $table->renamedFrom
-                    : "{$table->schema}.{$table->renamedFrom}";
+                // A name without a schema is in the schema the table is in now — or, when that
+                // schema had none of it, of no schema ({@see SchemaDiff}: MySQL has no name
+                // for the database of the connection, `public.` says it on PostgreSQL).
+                $bare = !str_contains($table->renamedFrom, '.') && $table->schema !== null;
+                $renamedTables[$name] = $bare ? "{$table->schema}.{$table->renamedFrom}" : $table->renamedFrom;
+                if ($bare) {
+                    $renamedBare[$name] = $table->renamedFrom;
+                }
             }
             foreach ($table->columns as $column) {
                 if ($column->renamedFrom !== null) {
@@ -113,6 +118,7 @@ final class SchemaModel
             'schemas' => array_values($schemas),
             'extensions' => $ext,
             'renamedTables' => $renamedTables,
+            'renamedBare' => $renamedBare,
             'unresolved' => $unresolved,
         ];
     }

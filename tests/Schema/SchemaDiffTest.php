@@ -279,6 +279,25 @@ final class SchemaDiffTest extends TestCase
         self::assertStringContainsString('ClientNotImported::$mail: #[RenamedFrom] is written without its `use`', $all);
     }
 
+    public function test_a_bare_renamed_from_is_the_table_of_no_schema_when_its_schema_had_none(): void
+    {
+        // MySQL: `orders` is in the database of the connection — no name for it in a model.
+        $this->record(['customers' => F\CustomerV2::class, 'orders' => F\OrderV1::class], driver: 'mysql');
+        $tables = fn() => [
+            ...F\SchemaFixtures::tables('mysql', ['clients' => F\ClientRenamed::class], 'shop'),
+            ...F\SchemaFixtures::tables('mysql', ['orders' => F\OrderV1::class]),
+        ];
+
+        $diff = SchemaSnapshot::diff($this->history, $tables(), 'mysql');
+
+        self::assertSame([], $diff->errors);
+        self::assertSame(['renameTable', 'customers', 'shop.clients'], [$diff->changes[0]['op'], $diff->changes[0]['from'], $diff->changes[0]['to']]);
+        SchemaSnapshot::write($this->history, $diff, 'mysql');
+        $again = SchemaSnapshot::diff($this->history, $tables(), 'mysql');
+        self::assertTrue($again->isEmpty() && $again->errors === [], implode(' ', $again->errors));
+        self::assertStringContainsString("#[RenamedFrom('customers')] is already recorded in V002", $again->notices[0]);
+    }
+
     public function test_renamed_from_a_table_that_is_not_there_is_an_error(): void
     {
         $this->record(['orders' => F\OrderV1::class]);

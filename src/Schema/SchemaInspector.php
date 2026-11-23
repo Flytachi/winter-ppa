@@ -186,7 +186,7 @@ final class SchemaInspector
         if ($driver === 'mysql') {
             // BOOLEAN is TINYINT(1) there: told apart before display widths are dropped.
             $t = preg_replace('/^tinyint\(1\)$/', 'bool', $t);
-            $t = preg_replace('/^(tinyint|smallint|mediumint|int|integer|bigint)\(\d+\)/', '$1', $t);
+            $t = preg_replace('/^(tinyint|smallint|mediumint|int|integer|bigint|year)\(\d+\)/', '$1', $t);
             $t = preg_replace('/ unsigned$/', '', $t);
         }
         return match ($t) {

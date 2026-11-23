@@ -18,6 +18,7 @@ final readonly class Step
      * @param ?string $before The body of before(CDO $db) — `$db` is there.
      * @param ?string $after The body of after(CDO $db).
      * @param ?string $props Declarations in the class, beside before() and after().
+     * @param list<string> $said Patterns the snapshot's notices must match — what it leaves out, said.
      * @param ?\Closure(\PDO): void $check Run right after the version, on a database with data.
      */
     public function __construct(
@@ -33,6 +34,7 @@ final readonly class Step
         public ?string $after = null,
         public ?\Closure $check = null,
         public ?string $props = null,
+        public array $said = [],
     ) {
     }
 }

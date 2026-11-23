@@ -87,8 +87,28 @@ All notable changes to this project are documented here. The format follows
   primary key changed; tables made and dropped; versions with code) over tables full of rows,
   applied one by one, all at once and from a random stop; the three end with the same schema.
   Then what must be refused. See `e2e/README.md`.
+- **E2E on MariaDB 10.11 and 11.8** — the same life, version for version, on a server where a
+  version is no transaction: what MariaDB has not is declared and must be left out with a notice,
+  what it cannot build must be refused; a failed version is applied once fixed, and a process
+  killed with SIGKILL in a version's code is gone on from by the next run.
+- **`snapshot` refuses what MySQL / MariaDB would make otherwise than declared**: `ON UPDATE` /
+  `ON DELETE SET DEFAULT` (InnoDB makes the key without it, silently).
+- **`snapshot` refuses an index of a column the entity has not** — a column renamed, its index
+  in another property still naming the old one: a live database renamed it along, a fresh one
+  failed on `Key column … doesn't exist`.
 
 ### Fixed
+
+- **MySQL / MariaDB: a foreign key from a table of another database to one of the connection's**
+  (`shop.payments` → `orders`) was refused by the server (errno 150): the name without a database
+  was looked for in `shop`. It gets the connection's database at migrate.
+- **MySQL / MariaDB: an index the server made for a foreign key stayed when the key was dropped**
+  — an upgraded database kept `fk_users_group_id`, one created fresh never had it. Dropped with its
+  key, unless an entity declares an index of that name (kept, too, while another key needs it).
+- **`#[RenamedFrom('audit_log')]` on a table moved into a schema** looked for `audit_log` in that
+  schema only. A bare name is still the table's schema first; when that had none of it, the table
+  of no schema — what MySQL has no other name for.
+- **MariaDB: `YEAR` was a difference** (`year(4)` as the server says it).
 
 - **`snapshot clean` left a `#[RenamedFrom]` that another attribute with arguments followed**
   (`#[RenamedFrom('x')]` above `#[Varchar(32)]`, or above `#[Check(…)]` on a class): it took the

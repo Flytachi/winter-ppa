@@ -163,6 +163,13 @@ final class SchemaDiff
     private function renamedTables(array $history, array $declared, array $versions, ?string $driver): array
     {
         foreach ($declared['renamedTables'] ?? [] as $to => $from) {
+            $bare = $declared['renamedBare'][$to] ?? null;
+            if (
+                $bare !== null && !isset($history[$from])
+                && (isset($history[$bare]) || self::tableRecordedIn($versions, $bare, $to) !== null)
+            ) {
+                $from = $bare;      // not in the table's schema: the table of no schema
+            }
             $entity = $declared['entities'][$to] ?? null;
             $who = $entity ?? $to;
             $property = '@' . ($entity !== null ? substr($entity, (int) strrpos('\\' . $entity, '\\')) : $to);

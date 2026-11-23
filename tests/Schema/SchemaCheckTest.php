@@ -74,6 +74,13 @@ final class SchemaCheckTest extends TestCase
         yield 'unique HASH, MySQL' => [F\ArticleUniqueHash::class, 'mysql', 'a unique index is a B-tree'];
         yield 'partial unique on MySQL' => [F\ArticleUniqueWhere::class, 'mysql', 'the unique index would hold over every row'];
         yield 'two indexes of one name' => [F\ArticleTwinIndexes::class, 'pgsql', 'two indexes are named articles_title_idx'];
+        yield 'an index of no column' => [F\ArticleIndexOfNoColumn::class, 'pgsql', 'slug_old is no column of articles — renamed or gone?'];
+        yield 'SET DEFAULT on MySQL' => [F\ArticleSetDefault::class, 'mysql', 'articles.author_id: ON UPDATE SET DEFAULT is not kept by MySQL / MariaDB'];
+    }
+
+    public function test_set_default_is_kept_by_postgresql(): void
+    {
+        self::assertSame([], $this->check(F\ArticleSetDefault::class, 'pgsql')['errors']);
     }
 
     #[DataProvider('refused')]

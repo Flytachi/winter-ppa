@@ -13,6 +13,7 @@ use Flytachi\Winter\Ppa\Schema\SchemaMigrator;
 use Flytachi\Winter\Ppa\Schema\SchemaModel;
 use Flytachi\Winter\Ppa\Schema\SchemaSnapshot;
 use Flytachi\Winter\Ppa\Schema\SchemaVersionFile;
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 /**
@@ -31,7 +32,6 @@ use Psr\Log\NullLogger;
  */
 final class Runner
 {
-    public const string OWNER = 'Flytachi\\Winter\\Ppa\\E2e\\PgDb';
     private const string CODE_NAMESPACE = 'Flytachi\\Winter\\Ppa\\E2e\\Versions';
 
     private CDO $db;
@@ -41,19 +41,20 @@ final class Runner
     private int $failures = 0;
     /** @var array<string, list<\ReflectionClass>> */
     private array $loaded = [];
+    private LoggerInterface $logger;
 
-    public function __construct(private readonly ?int $stop = null)
+    public function __construct(private readonly Driver $driver, private readonly ?int $stop = null)
     {
-        $this->steps = Scenario::steps();
+        $this->steps = $driver->steps();
+        $this->logger = new NullLogger();
         $this->tmp = sys_get_temp_dir() . '/ppa-e2e-' . getmypid() . '-' . bin2hex(random_bytes(3));
         mkdir($this->tmp . '/states', 0777, true);
     }
 
     public function run(): int
     {
-        $this->db = Db::open();
-        $version = (string) $this->db->query('SHOW server_version')->fetchColumn();
-        Out::title("PostgreSQL {$version}");
+        $this->db = $this->driver->open();
+        Out::title($this->driver->title($this->db));
         $started = hrtime(true);
         try {
             $this->coverage();
@@ -81,7 +82,7 @@ final class Runner
     /** @return array<string, list<string>> The schema it ends with. */
     private function variantA(): array
     {
-        Db::reset($this->db);
+        $this->driver->reset($this->db);
         $dir = $this->dir('history');
         $stage = 0;
         foreach ($this->steps as $i => $step) {
@@ -104,19 +105,19 @@ final class Runner
             if ($n === Scenario::STAGE_1) {
                 Out::stage(2);
                 $this->check('data', function (): string {
-                    Data::fill($this->db);
+                    $this->driver->fill($this->db);
                     $this->counts(Scenario::STAGE_1);
-                    return array_sum(Data::counts(Scenario::STAGE_1)) + Data::GROUPS . ' rows';
+                    return array_sum($this->driver->counts(Scenario::STAGE_1)) . ' rows';
                 });
             }
         }
         $this->check('again: nothing to apply', fn() => expect($this->migrator($dir)->migrate() === [], 'a second run applies nothing'));
-        return Db::dump($this->db);
+        return $this->driver->dump($this->db);
     }
 
     private function variantB(): array
     {
-        Db::reset($this->db);
+        $this->driver->reset($this->db);
         $dir = $this->copy(count($this->steps), 'b');
         $this->check(count($this->steps) . ' versions in one run', function () use ($dir): string {
             $done = $this->migrator($dir)->migrate();
@@ -130,12 +131,12 @@ final class Runner
                 $this->check('the checks of the last version', fn() => ($step->check)($this->db, false));
             }
         }
-        return Db::dump($this->db);
+        return $this->driver->dump($this->db);
     }
 
     private function variantC(int $k): array
     {
-        Db::reset($this->db);
+        $this->driver->reset($this->db);
         $stop = Scenario::STAGE_1 + $k;
         $runs = [[1, Scenario::STAGE_1], [Scenario::STAGE_1 + 1, $stop], [$stop + 1, count($this->steps)]];
         foreach ($runs as $r => [$from, $to]) {
@@ -152,12 +153,12 @@ final class Runner
             });
             if ($r === 0) {
                 $this->check('data', function (): string {
-                    Data::fill($this->db);
+                    $this->driver->fill($this->db);
                     return 'on V' . sprintf('%03d', Scenario::STAGE_1);
                 });
             }
         }
-        return Db::dump($this->db);
+        return $this->driver->dump($this->db);
     }
 
     private function errors(): void
@@ -166,35 +167,15 @@ final class Runner
         $last = $this->steps[$full - 1]->state;
 
         Out::stage('snapshot');
-        $refused = [
-            ['a column gone, no --drop', $last->without('users', 'locale'), '/users\.locale is gone from the entity/'],
-            ['a table gone, no --drop', $last->withoutTable('audit_events'), '/audit_events has no entity any more/'],
-            ['a table renamed without #[RenamedFrom]', $last->retable('labels', 'tags', null, null), '/public\.labels has no entity any more/'],
-            ['a key on the old name of a renamed table', $last->retable('labels', 'tags', null, "#[RenamedFrom('labels')]")->with('payments', 'label_id', ['#[SmallInteger]', "#[ForeignKey('labels', 'id')]"], '?int $label_id = null'), '/the foreign key fk_payments_label_id points at public\.labels, renamed to public\.tags/'],
-            ['#[RenamedFrom] of no table', $last->table('labels', ['attrs' => ["#[RenamedFrom('nope')]"]]), '/`public\.nope` is not a table of the last snapshot/'],
-            ['#[RenamedFrom] of a table declared too', $last->table('labels', ['attrs' => ["#[RenamedFrom('users')]"]]), '/`public\.users` is a table of the entities too/'],
-            ['a rename without #[RenamedFrom]', $last->renamed('users', 'email', 'mail', ['#[Varchar(160)]', '#[Unique]'], "string \$mail = ''"), '/users\.email is gone from the entity/'],
-            ['#[RenamedFrom] of no column', $last->with('users', 'nick', ['#[Varchar(20)]', "#[RenamedFrom('nope')]"], '?string $nick = null'), '/`nope` is not a column of the last snapshot/'],
-            ['NOT NULL without a default', $last->with('users', 'code', ['#[Varchar(8)]'], 'string $code'), '/users\.code is NOT NULL with no default/'],
-            ['a narrowing, not custom', $last->attrs('users', 'name', fn($a) => Scenario::swap($a, '#[Varchar(200)]', '#[Varchar(50)]')), '/users\.name/'],
-            ['a primary key changed, not custom', $last->attrs('audit_events', 'happened', fn($a) => Scenario::swap($a, '#[Primary]', null)), '/primary key changes/'],
-            ['a unique HASH index', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Unique(method: IndexMethod::HASH)]']), '/a unique index is a B-tree/'],
-            ['an extension dropped without --drop', $last->withoutExtension('btree_gist')->attrs('audit_events', 'level', fn($a) => Scenario::swap($a, '#[Index(method: IndexMethod::GIST)]', null)), null],
-            ['GIN on a VARCHAR', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index(method: IndexMethod::GIN)]']), '/no GIN operator class for locale/'],
-            ['HASH of two columns', $last->attrs('users', 'locale', fn($a) => [...$a, "#[Index(['email'], method: IndexMethod::HASH)]"]), '/a HASH index has one column/'],
-            ['trigrams without pg_trgm', $last->withoutExtension('pg_trgm'), '/comes with the extension pg_trgm/'],
-            ['two indexes of one name', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index]', '#[Index]']), '/two indexes are named public\.users_locale_idx|two indexes are named users_locale_idx/'],
-        ];
+        $refused = $this->driver->refused($last);
         $dir = $this->copy($full, 'err');
         $before = count(glob($dir->path . '/*.json'));
-        foreach ($refused as $j => [$what, $state, $why]) {
-            $this->check($what, function () use ($dir, $state, $why, $j): string {
+        foreach ($refused as $j => $case) {
+            [$what, $state, $why] = $case;
+            $this->check($what, function () use ($dir, $state, $why, $case, $j): string {
                 $diff = $this->diff($dir, new Step(4, 'refused', $state, ''), "R{$j}");
                 if ($why === null) {
-                    // Not refused — not done either: an extension leaves only by --drop.
-                    expect(!in_array('dropExtension', array_column($diff->changes, 'op'), true), 'the extension would be dropped');
-                    expect((bool) preg_grep('/--drop=extension:btree_gist drops it/', $diff->notices), 'no notice says how to drop it');
-                    return 'kept, said';
+                    return ($case[3])($diff);
                 }
                 expect($diff->errors !== [], 'the snapshot was not refused');
                 expect((bool) preg_grep($why, $diff->errors), 'refused for another reason: ' . implode(' ', $diff->errors));
@@ -218,17 +199,28 @@ final class Runner
             }
         });
         $this->refusedMigration('a version that arrived late', '/V010_\w+ is older than ' . self::v(count($this->steps)) . '.*arrived late/', function (): void {
-            $this->db->exec("DELETE FROM public.winter_ppa_schema_history WHERE version = 'V010'");
+            $this->db->exec('DELETE FROM ' . $this->history() . " WHERE version = 'V010'");
         });
-        $this->refusedMigration('a version of another driver', '/recorded for mysql, the database is pgsql/', function (SchemaDirectory $d): void {
+        $other = $this->driver->name() === 'pgsql' ? 'mysql' : 'pgsql';
+        $this->refusedMigration('a version of another driver', "/recorded for {$other}, the database is {$this->driver->name()}/", function (SchemaDirectory $d) use ($other): void {
             $next = self::v(count($this->steps) + 1);
-            file_put_contents($d->path . "/{$next}_other.json", json_encode(['version' => $next, 'name' => 'other', 'driver' => 'mysql', 'changes' => []]));
+            file_put_contents($d->path . "/{$next}_other.json", json_encode(['version' => $next, 'name' => 'other', 'driver' => $other, 'changes' => []]));
         });
 
+        $tx = $this->driver->transactional();
+        $how = $tx ? 'rolled back' : 'recorded as failed; it runs again from its start next time';
         $flag = $last->with('users', 'flag', ['#[Boolean]'], 'bool $flag = false');
-        $this->failingVersion('code that throws: the version rolled back', new Step(4, 'flag', $flag, '', custom: true, after: "throw new \\RuntimeException('no luck');"), '/' . self::v(count($this->steps) + 1) . '_flag failed and was rolled back: no luck/');
+        $this->failingVersion(
+            $tx ? 'code that throws: the version rolled back' : 'code that throws: recorded as failed, run again',
+            new Step(4, 'flag', $flag, '', custom: true, after: "throw new \\RuntimeException('no luck');"),
+            '/' . self::v(count($this->steps) + 1) . "_flag failed and was {$how}: no luck/",
+            fix: '// fixed',
+        );
         $narrow = $last->attrs('users', 'locale', fn($a) => ['#[Varchar(5)]']);
         $this->failingVersion('code that leaves the database wrong', new Step(4, 'narrow_locale', $narrow, '', custom: true), '/differs from its model.*users\.locale/s');
+        if (!$tx) {
+            $this->stoppedMidway($last);
+        }
     }
 
     // ── Steps ───────────────────────────────────────────────────────────────
@@ -242,7 +234,10 @@ final class Runner
             $has = count(array_filter($diff->changes, fn(array $c) => $c['op'] === $op));
             expect($has === $count, "{$op}: {$count} expected, {$has} recorded — " . implode(', ', array_column($diff->changes, 'op')));
         }
-        $written = SchemaSnapshot::write($dir, $diff, 'pgsql', $step->name, $step->custom, self::CODE_NAMESPACE);
+        foreach ($step->said as $pattern) {
+            expect((bool) preg_grep($pattern, $diff->notices), "no notice says {$pattern} — " . implode(' | ', $diff->notices));
+        }
+        $written = SchemaSnapshot::write($dir, $diff, $this->driver->name(), $step->name, $step->custom, self::CODE_NAMESPACE);
         expect($written['version'] === sprintf('V%03d', $n), "written as {$written['version']}");
         if ($step->custom) {
             self::fillCode(end($written['files']), $step);
@@ -260,7 +255,7 @@ final class Runner
         return SchemaSnapshot::diff(
             $dir,
             $items[0]->getTables(),
-            'pgsql',
+            $this->driver->name(),
             $step->drop,
             $step->keep,
             $step->custom,
@@ -274,7 +269,7 @@ final class Runner
         if (!isset($this->loaded[$key])) {
             $ns = 'Flytachi\\Winter\\Ppa\\E2e\\States\\' . $key;
             $file = "{$this->tmp}/states/{$key}.php";
-            file_put_contents($file, $state->code($ns));
+            file_put_contents($file, $state->code($ns, $this->driver));
             require $file;
             $this->loaded[$key] = array_map(
                 fn(array $t) => new \ReflectionClass($ns . '\\' . $t['repo']),
@@ -312,7 +307,7 @@ final class Runner
     private function refusedMigration(string $what, string $why, \Closure $break): void
     {
         $this->check($what, function () use ($why, $break): string {
-            Db::reset($this->db);
+            $this->driver->reset($this->db);
             $dir = $this->copy(count($this->steps), 'm' . bin2hex(random_bytes(2)));
             $this->migrator($dir)->migrate();
             $break($dir);
@@ -321,33 +316,122 @@ final class Runner
         }, stop: false);
     }
 
-    private function failingVersion(string $what, Step $step, string $why): void
+    /**
+     * A version that fails. Where a version is one transaction: rolled back, the schema as it
+     * was, no row. Elsewhere its steps stay and its row says `failed` — and with `$fix` (the
+     * body after() gets instead) it runs again from its start and is applied.
+     */
+    private function failingVersion(string $what, Step $step, string $why, ?string $fix = null): void
     {
-        $this->check($what, function () use ($step, $why): string {
-            Db::reset($this->db);
+        $this->check($what, function () use ($step, $why, $fix): string {
+            $this->driver->reset($this->db);
             $full = count($this->steps);
+            $version = self::v($full + 1);
             $dir = $this->copy($full, 'f' . bin2hex(random_bytes(2)));
             $this->migrator($dir)->migrate();
-            $schema = Db::dump($this->db);
+            $schema = $this->driver->dump($this->db);
             $this->snapshot($dir, $step, $full + 1, 'F_' . $step->name);
             $this->expectThrows(fn() => $this->migrator($dir)->migrate(), $why);
-            expect(Db::dump($this->db) === $schema, 'the schema changed: the version was not rolled back');
-            expect(one($this->db, "SELECT count(*) FROM public.winter_ppa_schema_history WHERE version = '" . self::v($full + 1) . "'") == 0, 'the failed version is in the history');
-            return 'rolled back';
+            $state = one($this->db, 'SELECT state FROM ' . $this->history() . " WHERE version = '{$version}'");
+            if ($this->driver->transactional()) {
+                expect($this->driver->dump($this->db) === $schema, 'the schema changed: the version was not rolled back');
+                expect($state === false, 'the failed version is in the history');
+                return 'rolled back';
+            }
+            expect($state === 'failed', "the version is recorded as {$state}, not failed");
+            if ($fix === null) {
+                return 'recorded as failed';
+            }
+            $file = glob("{$dir->path}/custom/{$version}_*.php")[0];
+            $php = (string) file_get_contents($file);
+            $body = (string) $step->after;
+            expect(str_contains($php, $body), 'the code to fix is not there');
+            file_put_contents($file, str_replace($body, $fix, $php));
+            // A new process, as a restart: this one has the old code loaded (and ppa says so).
+            ['done' => $done, 'error' => $error] = $this->apart($dir);
+            expect($error === '', "the fixed version failed: {$error}");
+            expect(array_column($done, 'action') === ['applied'], 'the fixed version was not applied');
+            $this->matchesModel($dir);
+            return 'recorded as failed, applied once fixed';
         }, stop: false);
+    }
+
+    /**
+     * Where a version is no transaction: the process killed in its code (SIGKILL — a restart, a
+     * liveness probe), its steps done. The next run says so, does what is left, and records it.
+     */
+    private function stoppedMidway(State $last): void
+    {
+        $this->check('killed midway: the next run goes on from there', function () use ($last): string {
+            $this->driver->reset($this->db);
+            $full = count($this->steps);
+            $version = self::v($full + 1);
+            $dir = $this->copy($full, 'k' . bin2hex(random_bytes(2)));
+            $this->migrator($dir)->migrate();
+            $flag = "{$this->tmp}/killed-" . bin2hex(random_bytes(2));
+            $sleep = 'touch(' . var_export($flag, true) . '); sleep(60);';
+            $state = $last->with('users', 'vip', ['#[Boolean]', "#[DefaultVal('false')]", '#[Index]'], 'bool $vip = false');
+            $this->snapshot($dir, new Step(4, 'vip', $state, '', custom: true, after: $sleep), $full + 1, 'K_vip');
+
+            ['killed' => $killed] = $this->apart($dir, killAt: $flag);
+            expect($killed, 'the process was not killed in its code');
+            expect(one($this->db, 'SELECT state FROM ' . $this->history() . " WHERE version = '{$version}'") === 'running', 'the version is not left running');
+            expect(isset(new SchemaInspector($this->db, $this->driver->name())->table('users')['columns']['vip']), 'the steps were not committed');
+
+            $file = glob("{$dir->path}/custom/{$version}_*.php")[0];
+            file_put_contents($file, str_replace($sleep, '// a restart', (string) file_get_contents($file)));
+            ['done' => $done, 'log' => $log, 'error' => $error] = $this->apart($dir);
+            expect($error === '', "the next run failed: {$error}");
+            expect(array_column($done, 'action') === ['applied'], 'the version was not applied');
+            expect((bool) preg_grep("/{$version}_vip was stopped midway the last time/", array_column($log, 1)), 'nothing said it was stopped midway');
+            $this->matchesModel($dir);
+            return 'running → applied, said';
+        }, stop: false);
+    }
+
+    /**
+     * `migrate` in a process of its own ({@see e2e/migrate.php}) — killed with SIGKILL once
+     * `$killAt` exists, when given.
+     *
+     * @return array{done: list<array>, log: list<array{string, string}>, error: string, killed: bool}
+     */
+    private function apart(SchemaDirectory $dir, ?string $killAt = null): array
+    {
+        $proc = proc_open(
+            [PHP_BINARY, dirname(__DIR__) . '/migrate.php', $this->driver::class, $dir->path, $this->owner()],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        $killed = false;
+        if ($killAt !== null) {
+            for ($i = 0; $i < 400 && !is_file($killAt); $i++) {
+                usleep(25_000);
+            }
+            if (is_file($killAt)) {
+                proc_terminate($proc, SIGKILL);
+                $killed = true;
+            }
+        }
+        $out = (string) stream_get_contents($pipes[1]);
+        $err = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+        $result = json_decode($out, true) ?? [];
+        return ['done' => $result['done'] ?? [], 'log' => $result['log'] ?? [], 'error' => $err, 'killed' => $killed];
     }
 
     // ── Checks ──────────────────────────────────────────────────────────────
 
     private function matchesModel(SchemaDirectory $dir): void
     {
-        $differences = new SchemaInspector($this->db, 'pgsql')->compare(SchemaModel::fold($dir->versions('pgsql')))['differences'];
+        $differences = new SchemaInspector($this->db, $this->driver->name())->compare(SchemaModel::fold($dir->versions($this->driver->name())))['differences'];
         expect($differences === [], 'the database differs from the model: ' . implode('; ', $differences));
     }
 
     private function counts(int $version): void
     {
-        foreach (Data::counts($version) as $table => $rows) {
+        foreach ($this->driver->counts($version) as $table => $rows) {
             $has = (int) one($this->db, "SELECT count(*) FROM {$table}");
             expect($has === $rows, "{$table}: {$rows} rows expected, {$has} there");
         }
@@ -361,8 +445,14 @@ final class Runner
     {
         Out::block('Coverage');
         $usages = [];
-        foreach ($this->steps as $step) {
-            $usages += array_flip($step->state->attributeUsages());
+        // The states of the scenario, and those its snapshots must refuse: what a server has
+        // not is checked there — refused as it must be.
+        $states = array_column($this->steps, 'state');
+        foreach ($this->driver->refused($this->steps[count($this->steps) - 1]->state) as $case) {
+            $states[] = $case[1];
+        }
+        foreach ($states as $state) {
+            $usages += array_flip($state->attributeUsages());
         }
         $usages = array_keys($usages);
         $used = [];
@@ -516,7 +606,20 @@ final class Runner
 
     private function migrator(SchemaDirectory $dir): SchemaMigrator
     {
-        return new SchemaMigrator($this->db, 'pgsql', $dir, self::OWNER, 'public', new NullLogger(), 'E2E');
+        return new SchemaMigrator($this->db, $this->driver->name(), $dir, $this->owner(), $this->driver->historySchema(), $this->logger, 'E2E');
+    }
+
+    /** Whose history: the config the states generate, by the driver. */
+    private function owner(): string
+    {
+        return 'Flytachi\\Winter\\Ppa\\E2e\\' . State::configName($this->driver);
+    }
+
+    /** The history table, as a query names it. */
+    private function history(): string
+    {
+        $schema = $this->driver->historySchema();
+        return ($schema !== null ? $schema . '.' : '') . 'winter_ppa_schema_history';
     }
 
     private function dir(string $name): SchemaDirectory

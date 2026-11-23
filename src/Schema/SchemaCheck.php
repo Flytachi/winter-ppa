@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Schema;
 
+use Flytachi\Winter\Ppa\Mapping\Constants\FKAction;
 use Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod;
 use Flytachi\Winter\Ppa\Mapping\Constants\IndexType;
+use Flytachi\Winter\Ppa\Mapping\Structure\ForeignKey;
 use Flytachi\Winter\Ppa\Mapping\Structure\Index;
 use Flytachi\Winter\Ppa\Mapping\Structure\Table;
 
@@ -65,9 +67,19 @@ final class SchemaCheck
                     continue;
                 }
                 $seen[$indexName] = self::what($index);
+                $named = [...array_values($index->columns), ...$index->includeColumns];
+                $unknown = array_diff($named, array_keys($types));
+                if ($unknown !== []) {
+                    $errors[] = "{$indexName}: " . implode(', ', $unknown) . ' is no column of ' . $name
+                        . ' — renamed or gone? Name a column the entity has.';
+                    continue;
+                }
                 [$e, $n] = self::index($index, $indexName, $types, $driver, $extensions);
                 array_push($errors, ...$e);
                 array_push($notices, ...$n);
+            }
+            if ($driver === 'mysql') {
+                array_push($errors, ...self::setDefault($table, $name));
             }
         }
         return ['errors' => $errors, 'notices' => $notices];
@@ -160,6 +172,32 @@ final class SchemaCheck
                     . "#[Extension('pg_trgm')], or declare #[Extension('{$btreeExt}')]"
                 : "declare #[Extension('{$btreeExt}')] on the database's config, or use a B-tree";
             $errors[] = "{$name}: PostgreSQL has no {$method} operator class for {$column} ({$type}) — {$hint}.";
+        }
+        return $errors;
+    }
+
+    /**
+     * InnoDB takes `SET DEFAULT` and drops it without a word: the key is made, its action is
+     * not — a row whose parent changes keeps a reference to nothing the entities allow.
+     *
+     * @return list<string>
+     */
+    private static function setDefault(Table $table, string $name): array
+    {
+        $keys = array_map(fn(ForeignKey $k) => [$k->columnName, $k], $table->foreignKeys);
+        foreach ($table->columns as $column) {
+            if ($column->foreignKey !== null) {
+                $keys[] = [$column->name, $column->foreignKey];
+            }
+        }
+        $errors = [];
+        foreach ($keys as [$column, $key]) {
+            foreach (['UPDATE' => $key->onUpdate, 'DELETE' => $key->onDelete] as $on => $action) {
+                if ($action === FKAction::SET_DEFAULT) {
+                    $errors[] = "{$name}.{$column}: ON {$on} SET DEFAULT is not kept by MySQL / MariaDB (InnoDB "
+                        . 'makes the key without it) — use SET NULL, CASCADE or RESTRICT.';
+                }
+            }
         }
         return $errors;
     }

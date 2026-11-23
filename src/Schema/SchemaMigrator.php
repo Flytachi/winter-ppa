@@ -34,6 +34,9 @@ final class SchemaMigrator
     private readonly SchemaHistory $history;
     private readonly SchemaInspector $inspector;
 
+    /** The connection's database, on MySQL / MariaDB: asked once, when needed. */
+    private ?string $database = null;
+
     public function __construct(
         private readonly CDO $db,
         private readonly string $driver,
@@ -141,7 +144,7 @@ final class SchemaMigrator
         $model = SchemaModel::fold($versions);
         $this->transaction(function () use ($model, $versions): void {
             foreach (SchemaSql::create($model, $this->driver, SchemaModel::objects($versions)) as $sql) {
-                $this->db->exec($sql);
+                $this->run($sql);
             }
             $this->inspector->forget();
             $this->verify($model, end($versions));
@@ -212,10 +215,11 @@ final class SchemaMigrator
                     continue;
                 }
                 foreach ($sql as $statement) {
-                    $this->db->exec($statement);
+                    $this->run($statement);
                 }
                 $this->inspector->forget();
             }
+            $this->dropKeyIndexes($v, $after);
             $code?->after($this->db);
             $this->inspector->forget();
             $this->verify($after, $v);
@@ -324,6 +328,57 @@ final class SchemaMigrator
             }
         }
         return false;
+    }
+
+    /**
+     * MySQL / MariaDB give a foreign key an index of its name when no index has its columns —
+     * and keep it when the key is dropped: an upgraded database kept `fk_users_group_id`, one
+     * created fresh never had it. Dropped with its key, unless the model has an index of that
+     * name. After the steps, every time: a version stopped between the two finds it here.
+     */
+    private function dropKeyIndexes(SchemaVersionFile $v, array $model): void
+    {
+        if ($this->driver !== 'mysql') {
+            return;
+        }
+        foreach ($v->changes as $c) {
+            if ($c['op'] !== 'dropConstraint' || $c['kind'] !== 'foreign') {
+                continue;
+            }
+            $have = $this->inspector->table($c['table']);
+            $left = $have !== null && in_array($c['name'], $have['indexes'], true);
+            if ($left && !isset($model[$c['table']]['indexes'][$c['name']])) {
+                try {
+                    $this->db->exec("ALTER TABLE {$c['table']} DROP INDEX {$c['name']}");
+                } catch (\PDOException $e) {
+                    if (($e->errorInfo[1] ?? null) !== 1553) {
+                        throw $e;
+                    }
+                    // 1553: another foreign key uses it — the server keeps it, and so do we.
+                }
+                $this->inspector->forget();
+            }
+        }
+    }
+
+    /**
+     * One statement of a version. On MySQL / MariaDB a table name without a database is in the
+     * database of the table at hand — a key from `shop.payments` to `orders` was looked for in
+     * `shop` and refused (errno 150). Such a reference gets the connection's database, which
+     * a snapshot cannot know; PostgreSQL finds it by its search_path.
+     */
+    private function run(string $statement): void
+    {
+        $elsewhere = '/^\s*(?:CREATE|ALTER)\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\./i';
+        if ($this->driver === 'mysql' && preg_match($elsewhere, $statement)) {
+            $this->database ??= (string) $this->db->query('SELECT DATABASE()')->fetchColumn();
+            $statement = (string) preg_replace(
+                '/\bREFERENCES\s+(\w+)\s*\(/i',
+                "REFERENCES `{$this->database}`.$1(",
+                $statement,
+            );
+        }
+        $this->db->exec($statement);
     }
 
     /** PostgreSQL and SQLite roll a schema change back; MySQL and MariaDB commit it at once. */

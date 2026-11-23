@@ -7,12 +7,14 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Tests\Schema\Fixtures;
 
+use Flytachi\Winter\Ppa\Mapping\Attributes\Additive\DefaultVal;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Constraint\ForeignKey;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Entity\Table;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Hybrid\Id;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Index;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Unique;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\{Integer, Json, Varchar};
-use Flytachi\Winter\Ppa\Mapping\Constants\IndexMethod;
+use Flytachi\Winter\Ppa\Mapping\Constants\{FKAction, IndexMethod};
 
 /** What every driver builds — with notices on MySQL / SQLite, never an error. */
 #[Table]
@@ -155,4 +157,29 @@ class ArticleSearchBare
 
     #[Json]
     public ?array $tags = null;
+}
+
+/** A key that sets its default: InnoDB makes it without the action. */
+#[Table]
+class ArticleSetDefault
+{
+    #[Id]
+    public ?int $id = null;
+
+    #[Integer]
+    #[DefaultVal('1')]
+    #[ForeignKey('authors', 'id', onUpdate: FKAction::SET_DEFAULT, onDelete: FKAction::SET_NULL)]
+    public ?int $author_id = null;
+}
+
+/** An index of a column the entity has not — renamed away, the index left naming it. */
+#[Table]
+class ArticleIndexOfNoColumn
+{
+    #[Id]
+    public ?int $id = null;
+
+    #[Varchar(40)]
+    #[Index(['slug_old'])]
+    public string $slug = '';
 }

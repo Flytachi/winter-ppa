@@ -139,9 +139,20 @@ final readonly class State
         return array_values(array_unique($out));
     }
 
-    /** The state as PHP, in a namespace of its own: a process cannot declare a class twice. */
-    public function code(string $namespace): string
+    /** The name of the config class the states generate for a driver: `PgDb`, `MySqlDb`. */
+    public static function configName(Driver $driver): string
     {
+        $base = $driver->configBase();
+        return substr($base, (int) strrpos($base, '\\') + 1, -strlen('Config'));
+    }
+
+    /** The state as PHP, in a namespace of its own: a process cannot declare a class twice. */
+    public function code(string $namespace, Driver $driver): string
+    {
+        $base = $driver->configBase();
+        $baseShort = substr($base, (int) strrpos($base, '\\') + 1);
+        $config = self::configName($driver);
+        $env = $driver->env();
         $ext = implode("\n", array_map(fn($args) => "#[Extension({$args})]", $this->extensions));
         $out = <<<PHP
             <?php
@@ -150,7 +161,7 @@ final readonly class State
 
             namespace {$namespace};
 
-            use Flytachi\\Winter\\Cdo\\Config\\PgDbConfig;
+            use {$base};
             use Flytachi\\Winter\\Ppa\\E2e\\{AuditLevel, UserStatus, UserStatusV2};
             use Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\Additive\\{DefaultVal, NullableIs};
             use Flytachi\\Winter\\Ppa\\Mapping\\Attributes\\Config\\{Extension, Migratable};
@@ -167,12 +178,12 @@ final readonly class State
 
             #[Migratable(priority: MigratablePriority::High)]
             {$ext}
-            final class PgDb extends PgDbConfig
+            final class {$config} extends {$baseShort}
             {
                 public function setUp(): void
                 {
                     [\$this->host, \$port, \$this->database, \$this->username, \$this->password]
-                        = explode(':', (string) getenv('E2E_PG'));
+                        = explode(':', (string) getenv('{$env}'));
                     \$this->port = (int) \$port;
                 }
             }
@@ -193,7 +204,7 @@ final readonly class State
             $out .= "class {$t['repo']} extends Repository\n{\n"
                 . "    public static string \$table = '{$name}';{$schema}\n"
                 . "    protected string \$entityClassName = {$t['class']}::class;\n"
-                . "    protected string \$dbConfigClassName = PgDb::class;\n}\n\n";
+                . "    protected string \$dbConfigClassName = {$config}::class;\n}\n\n";
         }
         return $out;
     }
