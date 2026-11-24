@@ -1,6 +1,6 @@
 {
     "name": "flytachi/winter-ppa",
-    "description": "PHP Persistence API — a pooled, coroutine-safe data layer for PHP: repositories, entity mapping and schema declarations over CDO.",
+    "description": "PHP Persistence API — a pooled, coroutine-safe data layer for PHP: repositories, entity mapping and versioned schema migrations from entity attributes, over CDO.",
     "type": "library",
     "license": "MIT",
     "scripts": {
@@ -26,7 +26,8 @@
         "flytachi/winter-base": "^3.0",
         "flytachi/winter-di": "^2.0",
         "flytachi/file-store": "^2.0",
-        "psr/log": "^3.0"
+        "psr/log": "^3.0",
+        "ext-pdo": "*"
     },
     "require-dev": {
         "phpunit/phpunit": "@stable",
@@ -35,7 +36,9 @@
     },
     "suggest": {
         "ext-swoole": "Enables the coroutine connection pool; without it one self-maintaining connection per config is used.",
-        "ext-pdo": "Required by the CDO driver this layer works through."
+        "ext-pdo_pgsql": "For PostgreSQL.",
+        "ext-pdo_mysql": "For MySQL and MariaDB.",
+        "ext-pdo_sqlite": "For SQLite."
     },
     "homepage": "https://winterframe.net",
     "support": {
@@ -54,7 +57,11 @@
         "swoole",
         "postgresql",
         "mysql",
-        "winter"
+        "winter",
+        "mariadb",
+        "sqlite",
+        "schema",
+        "schema-migrations"
     ],
     "authors": [
         {

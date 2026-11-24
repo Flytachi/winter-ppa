@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-11-24
+
 ### Added
 
 - **Schema versions — a database's schema follows the entities, version by version.** The entities
@@ -527,7 +529,9 @@ signatures. Console commands and applications calling those need no edit.
 **The connection pool mechanics** moved to `flytachi/winter-cpool`, where they are shared
 with `flytachi/winter-redis`.
 
-[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/flytachi/winter-ppa/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/flytachi/winter-ppa/compare/v1.3.0...v2.0.0
+[1.3.0]: https://github.com/flytachi/winter-ppa/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/flytachi/winter-ppa/releases/tag/v1.2.1
 [1.2.0]: https://github.com/flytachi/winter-ppa/releases/tag/v1.2.0
 [1.1.4]: https://github.com/flytachi/winter-ppa/releases/tag/v1.1.4
