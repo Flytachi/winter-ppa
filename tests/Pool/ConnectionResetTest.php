@@ -128,8 +128,11 @@ final class ConnectionResetTest extends TestCase
             $request = static function (callable $body): void {
                 $done = new \Swoole\Coroutine\WaitGroup(1);
                 go(static function () use ($body, $done): void {
+                    // Registered first, so run last: after the pool's own defer has taken the
+                    // connection back — which yields where SQLite is a coroutine (swoole's
+                    // coroutine_sqlite), letting the next request run before it is back.
+                    \Swoole\Coroutine::defer(static fn() => $done->done());
                     $body(PpaConnectionPool::db(ResetSqliteDb::class));
-                    $done->done();
                 });
                 $done->wait();
             };

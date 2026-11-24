@@ -64,11 +64,24 @@ final class ReleaseCurrentTest extends TestCase
         return PpaConnectionPool::stats()[ReleaseSqliteDb::class];
     }
 
+    /**
+     * The coroutine is over for the test only once the pool has its connection back: a
+     * defer registered first runs last, after the pool's. Without waiting, the outer
+     * coroutine reads the stats — or shuts the pool — while the inner one is still in a
+     * query, wherever SQLite yields (swoole's coroutine_sqlite).
+     */
+    private static function afterRelease(\Swoole\Coroutine\WaitGroup $done): void
+    {
+        \Swoole\Coroutine::defer(static fn() => $done->done());
+    }
+
     public function test_the_connection_goes_back_now_and_comes_again_on_the_next_query(): void
     {
         $out = [];
         \Swoole\Coroutine\run(function () use (&$out): void {
-            \Swoole\Coroutine\go(function () use (&$out): void {
+            $done = new \Swoole\Coroutine\WaitGroup(1);
+            \Swoole\Coroutine\go(function () use (&$out, $done): void {
+                self::afterRelease($done);
                 PpaConnectionPool::db(ReleaseSqliteDb::class)->query('SELECT 1');
                 $out['before'] = self::stats()['active'];
                 PpaConnectionPool::releaseCurrent();
@@ -76,6 +89,7 @@ final class ReleaseCurrentTest extends TestCase
                 PpaConnectionPool::db(ReleaseSqliteDb::class)->query('SELECT 1');
                 $out['again'] = self::stats()['active'];
             });
+            $done->wait();
             $out['ended'] = self::stats();
             PpaConnectionPool::shutdown();
         });
@@ -90,7 +104,9 @@ final class ReleaseCurrentTest extends TestCase
     {
         $out = [];
         \Swoole\Coroutine\run(function () use (&$out): void {
-            \Swoole\Coroutine\go(function () use (&$out): void {
+            $done = new \Swoole\Coroutine\WaitGroup(1);
+            \Swoole\Coroutine\go(function () use (&$out, $done): void {
+                self::afterRelease($done);
                 $db = PpaConnectionPool::db(ReleaseSqliteDb::class);
                 $db->beginTransaction();
                 PpaConnectionPool::releaseCurrent();
@@ -98,6 +114,7 @@ final class ReleaseCurrentTest extends TestCase
                 $out['same'] = PpaConnectionPool::db(ReleaseSqliteDb::class) === $db;
                 $db->rollBack();
             });
+            $done->wait();
             $out['ended'] = self::stats()['active'];
             PpaConnectionPool::shutdown();
         });
