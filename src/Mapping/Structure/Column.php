@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Flytachi\Winter\Ppa\Mapping\Structure;
 
+use Flytachi\Winter\Ppa\Schema\SchemaSql;
+
 final class Column implements StructureInterface
 {
     /**
@@ -43,7 +45,7 @@ final class Column implements StructureInterface
         ];
 
         if ($this->default !== null) {
-            $parts[] = 'DEFAULT ' . $this->default;
+            $parts[] = 'DEFAULT ' . SchemaSql::defaultValue($this->type, $this->default, $dialect);
         }
 
         return implode(' ', array_filter($parts));

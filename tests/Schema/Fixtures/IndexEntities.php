@@ -183,3 +183,17 @@ class ArticleIndexOfNoColumn
     #[Index(['slug_old'])]
     public string $slug = '';
 }
+
+/** A column of a word the servers keep: `order` everywhere, `rank` on MySQL 8. */
+#[Table]
+class ArticleReservedColumns
+{
+    #[Id]
+    public ?int $id = null;
+
+    #[Integer]
+    public int $order = 0;
+
+    #[Integer]
+    public int $rank = 0;
+}

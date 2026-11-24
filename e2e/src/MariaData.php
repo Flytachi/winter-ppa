@@ -27,7 +27,7 @@ final class MariaData
     {
         $db->beginTransaction();
         foreach (['admins', 'staff', 'guests'] as $g) {
-            $db->prepare('INSERT INTO `groups` (name, description) VALUES (?, ?)')->execute([$g, "the {$g}"]);
+            $db->prepare('INSERT INTO user_groups (name, description) VALUES (?, ?)')->execute([$g, "the {$g}"]);
         }
 
         $user = $db->prepare(

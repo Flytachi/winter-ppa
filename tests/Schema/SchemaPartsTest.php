@@ -401,4 +401,20 @@ final class SchemaPartsTest extends TestCase
         $this->expectExceptionMessageMatches('/V001_init\.json is not valid JSON/');
         SchemaVersionFile::read($this->dir . '/V001_init.json');
     }
+
+    public function test_a_long_text_default_is_an_expression_on_mysql(): void
+    {
+        $note = ['name' => 'note', 'type' => 'TEXT', 'nullable' => false, 'default' => "''"];
+
+        // MySQL has no literal default for TEXT, BLOB, JSON (error 1101); MariaDB takes both.
+        self::assertSame("note TEXT NOT NULL DEFAULT ('')", SchemaSql::columnDef($note, 'mysql'));
+        self::assertSame("note TEXT NOT NULL DEFAULT ''", SchemaSql::columnDef($note, 'pgsql'));
+        self::assertSame("DEFAULT ('{}')", 'DEFAULT ' . SchemaSql::defaultValue('JSON', "'{}'", 'mysql'));
+        self::assertSame('(UUID())', SchemaSql::defaultValue('MEDIUMBLOB', '(UUID())', 'mysql'), 'an expression already');
+        self::assertSame("'x'", SchemaSql::defaultValue('VARCHAR(10)', "'x'", 'mysql'), 'a literal where one is taken');
+        self::assertSame(
+            ["ALTER TABLE orders ADD COLUMN note TEXT NOT NULL DEFAULT ('')"],
+            SchemaSql::change(['op' => 'addColumn', 'table' => 'orders', 'column' => $note], 'mysql'),
+        );
+    }
 }

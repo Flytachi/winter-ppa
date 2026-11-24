@@ -3,7 +3,7 @@ name: E2E
 # The life of an application on a live database: 23 schema versions of six tables, with data,
 # applied one by one (A), all at once (B) and in two runs from a stop picked at random (C);
 # the three must end with the same schema. Then what must be refused — and, where a version
-# is no transaction (MariaDB), a process killed midway. See e2e/README.md.
+# is no transaction (MariaDB, MySQL), a process killed midway. See e2e/README.md.
 
 on:
   push:
@@ -107,6 +107,53 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -uroot -ptest -e 'CREATE DATABASE schema_tests'
           PPA_MARIA=127.0.0.1:3306:schema_tests:root:test vendor/bin/phpunit tests/Schema
+
+      - name: E2E — variants A, B, C, the refusals, a version killed midway
+        run: php e2e/run.php
+
+  mysql:
+    name: MySQL ${{ matrix.mysql }} · PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5']
+        mysql: ['8.4', '9.7']   # the two LTS kept
+
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: e2e
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ptest"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 60
+
+    env:
+      E2E_MYSQL: 127.0.0.1:3306:e2e:root:test
+      E2E_STOP: ${{ github.event.inputs.stop }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, pcntl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Schema tests on MySQL
+        run: |
+          mysql -h 127.0.0.1 -uroot -ptest -e 'CREATE DATABASE schema_tests'
+          PPA_MYSQL=127.0.0.1:3306:schema_tests:root:test vendor/bin/phpunit tests/Schema
 
       - name: E2E — variants A, B, C, the refusals, a version killed midway
         run: php e2e/run.php

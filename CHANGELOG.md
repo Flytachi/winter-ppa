@@ -93,6 +93,11 @@ All notable changes to this project are documented here. The format follows
   killed with SIGKILL in a version's code is gone on from by the next run.
 - **`snapshot` refuses what MySQL / MariaDB would make otherwise than declared**: `ON UPDATE` /
   `ON DELETE SET DEFAULT` (InnoDB makes the key without it, silently).
+- **E2E on MySQL 8.4 and 9.7** — the scenario of MariaDB, one driver to ppa.
+- **`snapshot` refuses a table or a column named by a word of the server** — ppa writes names
+  unquoted, and the server refused the statement at migrate, after the version was written:
+  `CREATE TABLE groups` on MySQL 8. The words are the servers' own (MySQL 8.4 / 9.7, MariaDB 11.8,
+  PostgreSQL 18), `ReservedWords`; `mysql` is MySQL's and MariaDB's together.
 - **`snapshot` refuses an index of a column the entity has not** — a column renamed, its index
   in another property still naming the old one: a live database renamed it along, a fresh one
   failed on `Key column … doesn't exist`.
@@ -109,6 +114,9 @@ All notable changes to this project are documented here. The format follows
   schema only. A bare name is still the table's schema first; when that had none of it, the table
   of no schema — what MySQL has no other name for.
 - **MariaDB: `YEAR` was a difference** (`year(4)` as the server says it).
+- **MySQL: a default on TEXT, BLOB or JSON was refused** (error 1101 — `#[DefaultVal("''")]` on a
+  `#[Text]`). It is written as an expression there, `DEFAULT ('')` (8.0.13 on; MariaDB takes both);
+  the snapshot keeps it as declared.
 
 - **`snapshot clean` left a `#[RenamedFrom]` that another attribute with arguments followed**
   (`#[RenamedFrom('x')]` above `#[Varchar(32)]`, or above `#[Check(…)]` on a class): it took the

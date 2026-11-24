@@ -14,7 +14,7 @@ use Flytachi\Winter\Cdo\Connection\CDO;
  *
  * A schema change commits at once there: a version is no transaction ({@see transactional()}).
  */
-final class MariaDriver implements Driver
+class MariaDriver implements Driver
 {
     public function name(): string
     {
@@ -39,12 +39,15 @@ final class MariaDriver implements Driver
     public function open(): CDO
     {
         $config = new class extends MySqlDbConfig {
+            public string $env = '';
+
             public function setUp(): void
             {
-                [$this->host, $port, $this->database, $this->username, $this->password] = explode(':', (string) getenv('E2E_MARIA'));
+                [$this->host, $port, $this->database, $this->username, $this->password] = explode(':', (string) getenv($this->env));
                 $this->port = (int) $port;
             }
         };
+        $config->env = $this->env();
         $config->setUp();
         return $config->connection();
     }
@@ -79,8 +82,11 @@ final class MariaDriver implements Driver
                 . " GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX))"
                 . " FROM information_schema.STATISTICS WHERE {$where()} GROUP BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, NON_UNIQUE, INDEX_TYPE ORDER BY 1"),
             'constraints' => [
-                ...col($db, "SELECT CONCAT_WS(' ', CONCAT(IF(c.CONSTRAINT_SCHEMA = 'shop', 'shop', 'main'), '.', c.TABLE_NAME), c.CONSTRAINT_NAME, 'CHECK', c.CHECK_CLAUSE)"
-                    . " FROM information_schema.CHECK_CONSTRAINTS c WHERE c.CONSTRAINT_SCHEMA {$in} AND c.TABLE_NAME <> 'winter_ppa_schema_history' ORDER BY 1"),
+                // CHECK_CONSTRAINTS has no table on MySQL: TABLE_CONSTRAINTS says it.
+                ...col($db, "SELECT CONCAT_WS(' ', CONCAT(IF(t.TABLE_SCHEMA = 'shop', 'shop', 'main'), '.', t.TABLE_NAME), c.CONSTRAINT_NAME, 'CHECK', c.CHECK_CLAUSE)"
+                    . ' FROM information_schema.CHECK_CONSTRAINTS c JOIN information_schema.TABLE_CONSTRAINTS t'
+                    . " ON t.CONSTRAINT_SCHEMA = c.CONSTRAINT_SCHEMA AND t.CONSTRAINT_NAME = c.CONSTRAINT_NAME AND t.CONSTRAINT_TYPE = 'CHECK'"
+                    . " WHERE c.CONSTRAINT_SCHEMA {$in} AND t.TABLE_NAME <> 'winter_ppa_schema_history' ORDER BY 1"),
                 ...col($db, "SELECT CONCAT_WS(' ', {$table('k.')}, k.CONSTRAINT_NAME, 'FOREIGN KEY',"
                     . ' GROUP_CONCAT(k.COLUMN_NAME ORDER BY k.ORDINAL_POSITION), \'→\','
                     . " CONCAT(IF(k.REFERENCED_TABLE_SCHEMA = 'shop', 'shop', 'main'), '.', k.REFERENCED_TABLE_NAME),"

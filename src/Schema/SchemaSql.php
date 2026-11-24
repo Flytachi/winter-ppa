@@ -45,7 +45,7 @@ final class SchemaSql
         return match ($c['op']) {
             'createTable'    => [self::createTable($t, $c['columns'], $c['primaryKey'] ?? [], $driver)],
             'dropTable'      => ["DROP TABLE {$t}"],
-            'addColumn'      => ["ALTER TABLE {$t} ADD COLUMN " . self::columnDef($c['column'])],
+            'addColumn'      => ["ALTER TABLE {$t} ADD COLUMN " . self::columnDef($c['column'], $driver)],
             'dropColumn'     => ["ALTER TABLE {$t} DROP COLUMN {$c['column']}"],
             'detachColumn'   => [],
             'renameColumn'   => self::renameColumn($t, $c['from'], $c['to'], $driver),
@@ -117,15 +117,29 @@ final class SchemaSql
         return array_merge($first, $tables, $indexes, $constraints);
     }
 
-    public static function columnDef(array $c): string
+    public static function columnDef(array $c, ?string $driver = null): string
     {
         $c = SchemaModel::column($c);
         return trim(implode(' ', array_filter([
             $c['name'],
             $c['type'],
             $c['nullable'] ? '' : 'NOT NULL',
-            $c['default'] !== null ? 'DEFAULT ' . $c['default'] : '',
+            $c['default'] !== null ? 'DEFAULT ' . self::defaultValue($c['type'], $c['default'], $driver) : '',
         ])));
+    }
+
+    /**
+     * A column's default as the server takes it. MySQL has no literal default for TEXT, BLOB
+     * and JSON (error 1101): an expression it takes — `DEFAULT ('')`, 8.0.13 on; MariaDB both.
+     * Written so, not recorded so: the snapshot keeps the default as declared.
+     */
+    public static function defaultValue(string $type, string $default, ?string $driver): string
+    {
+        $long = '/^(tiny|medium|long)?(text|blob)\b|^json\b/i';
+        if ($driver === 'mysql' && preg_match($long, trim($type)) && !str_starts_with(trim($default), '(')) {
+            return "({$default})";
+        }
+        return $default;
     }
 
     /**
@@ -140,7 +154,7 @@ final class SchemaSql
         string $driver,
         array $constraints = [],
     ): string {
-        $lines = array_map(fn(array $c) => '    ' . self::columnDef($c), $columns);
+        $lines = array_map(fn(array $c) => '    ' . self::columnDef($c, $driver), $columns);
         if ($primaryKey !== []) {
             $lines[] = '    PRIMARY KEY (' . implode(', ', $primaryKey) . ')';
         }
@@ -171,7 +185,7 @@ final class SchemaSql
             );
         }
         if ($driver === 'mysql') {
-            return ["ALTER TABLE {$t} MODIFY COLUMN " . self::columnDef($to)];
+            return ["ALTER TABLE {$t} MODIFY COLUMN " . self::columnDef($to, $driver)];
         }
         $out = [];
         [$typeFrom, $restFrom] = SchemaDiff::base($from['type']);

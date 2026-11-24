@@ -78,6 +78,19 @@ final class SchemaCheckTest extends TestCase
         yield 'SET DEFAULT on MySQL' => [F\ArticleSetDefault::class, 'mysql', 'articles.author_id: ON UPDATE SET DEFAULT is not kept by MySQL / MariaDB'];
     }
 
+    public function test_a_name_the_server_keeps_is_an_error(): void
+    {
+        $mysql = implode("\n", SchemaCheck::tables(F\SchemaFixtures::tables('mysql', ['groups' => F\ArticleReservedColumns::class]), 'mysql')['errors']);
+        self::assertStringContainsString('groups: `groups` is a word of MySQL / MariaDB — the server refuses it as a table name', $mysql);
+        self::assertStringContainsString('groups.order: `order` is a word of MySQL / MariaDB', $mysql);
+        self::assertStringContainsString('groups.rank: `rank`', $mysql);
+
+        // PostgreSQL has neither `groups` nor `rank`; `order` it keeps.
+        $pg = SchemaCheck::tables(F\SchemaFixtures::tables('pgsql', ['groups' => F\ArticleReservedColumns::class]), 'pgsql')['errors'];
+        self::assertSame(['groups.order: `order` is a word of PostgreSQL — the server refuses it as a column name. Name the property otherwise.'], $pg);
+        self::assertSame([], SchemaCheck::tables(F\SchemaFixtures::tables('sqlite', ['groups' => F\ArticleReservedColumns::class]), 'sqlite')['errors']);
+    }
+
     public function test_set_default_is_kept_by_postgresql(): void
     {
         self::assertSame([], $this->check(F\ArticleSetDefault::class, 'pgsql')['errors']);

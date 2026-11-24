@@ -34,7 +34,7 @@ final class MariaScenario
         ]);
 
         $s = $s->with('users', 'phone', ['#[Varchar(32)]'], '?string $phone = null', after: 'email')
-            ->with('groups', 'position', ['#[Integer]'], 'int $position = 0')
+            ->with('user_groups', 'position', ['#[Integer]'], 'int $position = 0')
             ->with('products', 'color', ['#[Varchar(20)]', "#[DefaultVal(\"'black'\")]"], 'string $color = \'black\'')
             ->with('orders', 'discount', ['#[Decimal(5, 2)]'], "string \$discount = '0'");
         $steps[] = new Step(1, 'add_columns', $s, 'a column added to four tables', expect: ['addColumn' => 4]);
@@ -45,9 +45,9 @@ final class MariaScenario
         $steps[] = new Step(1, 'rename_columns', $s, 'three columns renamed', expect: ['renameColumn' => 3, 'addColumn' => 0, 'dropColumn' => 0]);
 
         $s = Scenario::clean($s)
-            ->without('users', 'mobile')->without('users', 'born')->without('groups', 'position')->without('products', 'colour');
+            ->without('users', 'mobile')->without('users', 'born')->without('user_groups', 'position')->without('products', 'colour');
         $steps[] = new Step(1, 'drop_columns', $s, 'three columns dropped (--drop), one left in the database (--keep)',
-            drop: ['users.mobile', 'users.born', 'groups.position'],
+            drop: ['users.mobile', 'users.born', 'user_groups.position'],
             keep: ['shop.products.colour'],
             expect: ['dropColumn' => 3, 'detachColumn' => 1],
         );
@@ -150,13 +150,13 @@ final class MariaScenario
         $s = $s->attrs('users', 'name', fn($a) => Scenario::swap($a, '#[Varchar(120)]', '#[Varchar(200)]'))
             ->attrs('orders', 'total', fn($a) => Scenario::swap($a, '#[Decimal(12, 2)]', '#[Decimal(14, 2)]'))
             ->attrs('audit_log', 'level', fn($a) => Scenario::swap($a, '#[SmallInteger]', '#[Integer]'))
-            ->attrs('groups', 'id', fn($a) => Scenario::swap($a, '#[SmallId]', '#[Id]'));
+            ->attrs('user_groups', 'id', fn($a) => Scenario::swap($a, '#[SmallId]', '#[Id]'));
         $steps[] = new Step(3, 'widen_types', $s, 'VARCHAR, DECIMAL, an integer and an id widened, by the kernel', expect: ['alterColumn' => 4], check: static function (\PDO $db, bool $data): void {
             expect(self::column($db, 'users', 'name') === 'varchar(200) NO', 'users.name is VARCHAR(200)');
-            expect(self::column($db, 'groups', 'id') === 'int(11) NO auto_increment', 'groups.id is an INT auto_increment');
+            expect(self::column($db, 'user_groups', 'id') === 'int NO auto_increment', 'user_groups.id is an INT auto_increment');
             if ($data) {
                 expect(one($db, 'SELECT sum(total) FROM orders') == Data::ORDERS_TOTAL, 'the totals are untouched');
-                expect(one($db, 'SELECT count(*) FROM `groups`') == Data::GROUPS, 'the groups are there');
+                expect(one($db, 'SELECT count(*) FROM user_groups') == Data::GROUPS, 'the groups are there');
             }
         });
 
@@ -180,7 +180,8 @@ final class MariaScenario
         $steps[] = new Step(3, 'not_null', $s, 'NOT NULL over NULLs: before() fills them; #[NullableIs(false)] on a ?float', custom: true, expect: ['alterColumn' => 2],
             before: "\$db->exec(\"UPDATE orders SET note = '' WHERE note IS NULL\");",
             check: static function (\PDO $db, bool $data): void {
-                expect(str_ends_with((string) self::column($db, 'orders', 'note'), ' NO') && str_ends_with((string) self::column($db, 'users', 'rating'), ' NO'), 'orders.note and users.rating are NOT NULL');
+                // MySQL says an expression default (TEXT's) in the extra: `DEFAULT_GENERATED`.
+                expect(preg_match('/ NO\b/', (string) self::column($db, 'orders', 'note')) && preg_match('/ NO\b/', (string) self::column($db, 'users', 'rating')), 'orders.note and users.rating are NOT NULL');
                 if ($data) {
                     expect(one($db, "SELECT count(*) FROM orders WHERE note = ''") == Data::ORDERS_WITHOUT_NOTE, 'the empty notes are filled');
                 }
@@ -201,7 +202,8 @@ final class MariaScenario
             expect(self::refusedSql($db, "INSERT INTO audit_log (event, level) VALUES ('x', 7)"), 'level 7 is no AuditLevel');
             expect(!self::refusedSql($db, "INSERT INTO users (email, name, age) VALUES ('old@e2e.test', 'Old', -1)"), 'the age check is gone');
             expect(self::check($db, 'chk_orders_total') === null && self::check($db, 'chk_orders_total_positive') !== null, 'the table check is renamed');
-            expect(one($db, "SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'") === "'new'", 'the default is new');
+            // MariaDB says a string default quoted, MySQL bare.
+            expect(in_array(one($db, "SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'"), ["'new'", 'new'], true), 'the default is new');
         });
 
         // V016 — a column renamed with its foreign key and its composite index.
@@ -233,7 +235,7 @@ final class MariaScenario
         $steps[] = new Step(3, 'new_tables', $s, 'two new tables, one in the database shop, filled by after()', custom: true, expect: ['createTable' => 2, 'addConstraint' => 2, 'addIndex' => 2],
             after: "\$db->exec('INSERT INTO shop.payments (order_id, amount, paid_at) SELECT id, total, placed_at FROM orders WHERE paid'); \$db->exec(\"INSERT INTO labels (name) VALUES ('red'), ('green'), ('blue')\");",
             check: static function (\PDO $db, bool $data): void {
-                expect(self::column($db, 'labels', 'id') === 'smallint(6) NO auto_increment', 'labels.id is a SMALLINT auto_increment');
+                expect(self::column($db, 'labels', 'id') === 'smallint NO auto_increment', 'labels.id is a SMALLINT auto_increment');
                 if ($data) {
                     expect(one($db, 'SELECT count(*) FROM shop.payments') == Data::ORDERS_PAID, 'a payment per paid order');
                     expect(one($db, 'SELECT count(*) FROM labels') == 3, 'three labels');
@@ -253,11 +255,11 @@ final class MariaScenario
 
         // V019 — dropped: a table, a column, an index. The extension leaves the config: nothing
         // here to drop.
-        $s = $s->withoutTable('groups')->without('products', 'weight')
+        $s = $s->withoutTable('user_groups')->without('products', 'weight')
             ->attrs('products', 'title', fn($a) => Scenario::swap($a, '#[Index]', null))
             ->withoutExtension('pg_trgm');
-        $steps[] = new Step(3, 'drops', $s, 'a table, a column and an index dropped; an extension gone from the config — nothing here', drop: ['groups', 'shop.products.weight'], expect: ['dropTable' => 1, 'dropColumn' => 1, 'dropIndex' => 1, 'dropExtension' => 0], check: static function (\PDO $db): void {
-            expect(one($db, "SELECT count(*) FROM information_schema.TABLES WHERE TABLE_NAME = 'groups'") == 0, 'groups is gone');
+        $steps[] = new Step(3, 'drops', $s, 'a table, a column and an index dropped; an extension gone from the config — nothing here', drop: ['user_groups', 'shop.products.weight'], expect: ['dropTable' => 1, 'dropColumn' => 1, 'dropIndex' => 1, 'dropExtension' => 0], check: static function (\PDO $db): void {
+            expect(one($db, "SELECT count(*) FROM information_schema.TABLES WHERE TABLE_NAME = 'user_groups'") == 0, 'user_groups is gone');
             expect(self::index($db, 'products_title_idx') === null, 'the plain title index is gone');
         });
 
@@ -347,7 +349,8 @@ final class MariaScenario
     public static function initial(): State
     {
         return new State([
-            'groups' => ['class' => 'Group', 'repo' => 'GroupRepo', 'schema' => null, 'attrs' => [], 'props' => [
+            // not `groups`: a word of MySQL 8 ({@see refused()})
+            'user_groups' => ['class' => 'Group', 'repo' => 'GroupRepo', 'schema' => null, 'attrs' => [], 'props' => [
                 'id' => [['#[SmallId]'], '?int $id = null'],
                 'name' => [['#[Varchar(80)]', '#[Unique]'], "string \$name = ''"],
                 'description' => [['#[Text]'], '?string $description = null'],
@@ -432,6 +435,8 @@ final class MariaScenario
             ['a primary key changed, not custom', $last->attrs('audit_events', 'happened', fn($a) => Scenario::swap($a, '#[Primary]', null)), '/primary key changes/'],
             ['a unique HASH index', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Unique(method: IndexMethod::HASH)]']), '/a unique index is a B-tree/'],
             ['two indexes of one name', $last->attrs('users', 'locale', fn($a) => [...$a, '#[Index]', '#[Index]']), '/two indexes are named users_locale_idx/'],
+            ['a table named by a word of the server', $last->retable('labels', 'groups', null, "#[RenamedFrom('labels')]"), '/`groups` is a word of MySQL \/ MariaDB — the server refuses it as a table name/'],
+            ['a column named by a word of the server', $last->with('users', 'rank', ['#[Integer]'], 'int $rank = 0'), '/users\.rank: `rank` is a word of MySQL \/ MariaDB/'],
             ['an index of a column there is not', $last->attrs('users', 'locale', fn($a) => [...$a, "#[Index(['nick'])]"]), '/nick is no column of users/'],
             // What MariaDB has not.
             ['a GIN index', $last->attrs('users', 'profile', fn($a) => [...$a, '#[Index(method: IndexMethod::GIN)]']), '/MySQL \/ MariaDB have no GIN index/'],
@@ -473,12 +478,15 @@ final class MariaScenario
         return is_string($row) ? $row : null;
     }
 
-    /** A column: `type NULL? extra`; null when there is none. */
+    /**
+     * A column: `type NULL? extra`; null when there is none. Without an integer's display width:
+     * MariaDB says `int(11)`, MySQL 8 `int`.
+     */
     private static function column(\PDO $db, string $table, string $column): ?string
     {
         $row = one($db, "SELECT TRIM(CONCAT_WS(' ', COLUMN_TYPE, IS_NULLABLE, EXTRA)) FROM information_schema.COLUMNS"
             . " WHERE TABLE_SCHEMA IN (DATABASE(), 'shop') AND TABLE_NAME = '{$table}' AND COLUMN_NAME = '{$column}'");
-        return is_string($row) ? $row : null;
+        return is_string($row) ? preg_replace('/^(tinyint|smallint|mediumint|int|bigint|year)\(\d+\)/', '$1', $row) : null;
     }
 
     /** Whether the server refuses the statement — tried in a transaction, undone either way. */

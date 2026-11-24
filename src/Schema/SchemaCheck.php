@@ -49,6 +49,7 @@ final class SchemaCheck
         $notices = [];
         foreach ($tables as $table) {
             $name = $table->getFullName();
+            array_push($errors, ...self::reserved($table, $name, $driver));
             $types = [];
             $indexes = $table->indexes;
             foreach ($table->columns as $column) {
@@ -172,6 +173,33 @@ final class SchemaCheck
                     . "#[Extension('pg_trgm')], or declare #[Extension('{$btreeExt}')]"
                 : "declare #[Extension('{$btreeExt}')] on the database's config, or use a B-tree";
             $errors[] = "{$name}: PostgreSQL has no {$method} operator class for {$column} ({$type}) — {$hint}.";
+        }
+        return $errors;
+    }
+
+    /**
+     * A name the server takes for its own: ppa writes names unquoted, the server refuses the
+     * statement — `CREATE TABLE groups` on MySQL 8 — at migrate, after the snapshot is written.
+     *
+     * @return list<string>
+     */
+    private static function reserved(Table $table, string $name, string $driver): array
+    {
+        $server = match ($driver) {
+            'mysql' => 'MySQL / MariaDB',
+            'pgsql' => 'PostgreSQL',
+            default => $driver,
+        };
+        $errors = [];
+        if (ReservedWords::is($table->name, $driver)) {
+            $errors[] = "{$name}: `{$table->name}` is a word of {$server} — the server refuses it as a table name. "
+                . 'Name the table otherwise (the repository\'s `$table`).';
+        }
+        foreach ($table->columns as $column) {
+            if (ReservedWords::is($column->name, $driver)) {
+                $errors[] = "{$name}.{$column->name}: `{$column->name}` is a word of {$server} — the server refuses "
+                    . 'it as a column name. Name the property otherwise.';
+            }
         }
         return $errors;
     }
