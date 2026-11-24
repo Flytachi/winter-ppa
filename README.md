@@ -3,6 +3,9 @@
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/flytachi/winter-ppa.svg)](https://packagist.org/packages/flytachi/winter-ppa)
 [![PHP Version Require](https://img.shields.io/packagist/php-v/flytachi/winter-ppa.svg?style=flat-square)](https://packagist.org/packages/flytachi/winter-ppa)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE)
+[![Tests](https://github.com/flytachi/winter-ppa/actions/workflows/tests.yml/badge.svg)](https://github.com/flytachi/winter-ppa/actions/workflows/tests.yml)
+[![E2E](https://github.com/flytachi/winter-ppa/actions/workflows/e2e.yml/badge.svg)](https://github.com/flytachi/winter-ppa/actions/workflows/e2e.yml)
+[![Docs](https://img.shields.io/badge/docs-winterframe.net-blue.svg)](https://winterframe.net/docs/ppa)
 
 📖 **[Documentation](https://winterframe.net/docs/ppa)** · [Repositories](https://winterframe.net/docs/repository) · [Entities](https://winterframe.net/docs/entities) · [Connection pool](https://winterframe.net/docs/ppa-pooling)
 
@@ -15,8 +18,9 @@ dies, the database restarts, the firewall drops idle sockets — while under Swo
 socket cannot be shared by concurrent requests at all.
 
 PPA answers both: repositories that assemble queries as method calls, entities that
-describe tables as attributes, migrations built from those attributes — over a connection
-pool that keeps its connections **working** rather than merely reused.
+describe tables as attributes, schema versions recorded from those attributes and applied in
+order — over a connection pool that keeps its connections **working** rather than merely
+reused.
 
 ---
 
@@ -32,6 +36,26 @@ process — the calling code is identical.
 
 Inside the Winter framework it is an optional package: the kernel wires it up when it is
 installed and works without it when it is not.
+
+---
+
+## Tested on
+
+Every push and pull request runs two workflows:
+
+| | Versions | What runs |
+|---|---|---|
+| PHP | 8.4 · 8.5, with swoole and without | every test of the package ([`tests.yml`](.github/workflows/tests.yml)) |
+| PostgreSQL | 16 · 18 | the schema tests on a live server, then the e2e |
+| MariaDB | 10.11 · 11.8 | the same, plus a version killed midway |
+| MySQL | 8.4 · 9.7 | the same, plus a version killed midway |
+| SQLite | the runner's · 3.40 | the e2e, table rebuilds included |
+
+The e2e ([`e2e.yml`](.github/workflows/e2e.yml), [`e2e/README.md`](e2e/README.md)) is the
+life of an application on a live database: six tables with every attribute ppa has, rows in
+them, and 23 schema versions applied one by one, all at once, and in two runs from a random
+stop — the three must end with the same schema. Then what `snapshot` and `migrate` must
+refuse.
 
 ---
 
@@ -102,8 +126,12 @@ joined, used as a source or as a CTE — and brings its own binds along, which a
 could not.
 
 **A schema that comes from the code.** Attributes on entity properties describe types,
-keys, indexes and constraints; `call db migrate` compares that description with the live
-database and shows what it would change before doing it.
+keys, indexes and constraints — the only description of the schema there is. `call db
+snapshot` records what changed in them as a numbered version (renames named with
+`#[RenamedFrom]`, data lost only when asked); `call db migrate` applies to each database the
+versions it lacks, in order, each one whole, and checks the database against the version
+afterwards. Moving data or narrowing a type is code of the version — `before()` and
+`after()`. PostgreSQL, MySQL, MariaDB and SQLite.
 
 **Connections that heal.** An idle connection is probed before it is handed over, an aged
 one is rotated ahead of time, and the number is capped per worker. A database restart stops
@@ -209,7 +237,8 @@ language; RU and EN are both complete).
 | Page | What it answers |
 |------|-----------------|
 | [Entities](https://winterframe.net/docs/entities) | Attributes, types, keys, indexes, constraints |
-| [Migrations](https://winterframe.net/docs/migrations) | Comparing the described schema with the live one |
+| [Migrations](https://winterframe.net/docs/migrations) | Schema versions: snapshot, migrate, renames, code for the data, migrations at start |
+| [CLI → db](https://winterframe.net/docs/cmd-db) | `snapshot`, `status`, `migrate` and their flags, `--dry` |
 
 **Operating it**
 
@@ -231,6 +260,22 @@ XDEBUG_MODE=off composer test   # phpunit
 composer test-detail            # phpunit --testdox
 composer cs-check               # phpcs
 composer cs-fix                 # phpcbf
+```
+
+Without a server the tests of a live PostgreSQL, MySQL and MariaDB skip themselves. Point
+them at one (an empty database of its own — it is emptied) as `host:port:database:user:password`:
+
+```bash
+PPA_PG=127.0.0.1:5432:schema_tests:postgres:test vendor/bin/phpunit tests/Schema
+PPA_MARIA=127.0.0.1:3306:schema_tests:root:test vendor/bin/phpunit tests/Schema
+PPA_MYSQL=127.0.0.1:3306:schema_tests:root:test vendor/bin/phpunit tests/Schema
+```
+
+The e2e runs the same way — one database at a time, see [`e2e/README.md`](e2e/README.md):
+
+```bash
+E2E_PG=127.0.0.1:5432:e2e:postgres:test php e2e/run.php
+E2E_SQLITE=/tmp/e2e.sqlite php e2e/run.php
 ```
 
 - Setup, the testing philosophy and the documentation rules: [CONTRIBUTING.md](CONTRIBUTING.md)

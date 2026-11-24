@@ -1,0 +1,47 @@
+name: Tests
+
+# Every test of the package, with no database server: SQLite comes with PHP, the tests of a
+# live PostgreSQL / MySQL / MariaDB skip themselves here (they run in e2e.yml). With swoole and
+# without — the pool hands out a connection per coroutine, or keeps one per process: both are
+# shipped, both are tested.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} · ${{ matrix.swoole && 'swoole' || 'no swoole' }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+        swoole: [true, false]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_sqlite, mbstring${{ matrix.swoole && ', swoole' || ', :swoole' }}
+          coverage: none
+
+      - name: Verify the extensions
+        run: |
+          php -r 'exit(extension_loaded("pdo_sqlite") ? 0 : 1);'
+          php -r 'exit(extension_loaded("swoole") === ${{ matrix.swoole }} ? 0 : 1);'
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Tests
+        run: vendor/bin/phpunit
+
+      - name: Code style (PSR-12)
+        if: matrix.php == '8.5' && matrix.swoole
+        run: vendor/bin/phpcs .
