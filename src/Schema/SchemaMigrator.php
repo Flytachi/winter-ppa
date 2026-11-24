@@ -162,35 +162,54 @@ final class SchemaMigrator
     }
 
     /**
+     * A database with the history's tables and no history: how far it already is — the
+     * latest version it matches, which `migrate` records as baseline with every one before
+     * it. Reads the database, writes nothing: what `--dry` shows is what a run does.
+     *
+     * @param list<SchemaVersionFile>|null $versions The versions of the directory when null.
+     * @return array{matched: int, differences: list<string>} `matched`: how many versions,
+     *     from the first, the database already is; 0 — none, `differences` (against the last
+     *     version) say why.
+     */
+    public function baselineMatch(?array $versions = null): array
+    {
+        $versions ??= $this->directory->versions($this->driver);
+        $differences = [];
+        for ($i = count($versions) - 1; $i >= 0; $i--) {
+            $cmp = $this->inspector->compare(SchemaModel::fold(array_slice($versions, 0, $i + 1)));
+            if ($cmp['differences'] === []) {
+                return ['matched' => $i + 1, 'differences' => []];
+            }
+            if ($i === count($versions) - 1) {
+                $differences = $cmp['differences'];
+            }
+        }
+        return ['matched' => 0, 'differences' => $differences];
+    }
+
+    /**
      * A database with the history's tables and no history: the latest version it matches.
      *
      * @return list<array{version: string, action: string, ms: int}>
      */
     private function baseline(array $versions): array
     {
-        $firstDiff = null;
-        for ($i = count($versions) - 1; $i >= 0; $i--) {
-            $model = SchemaModel::fold(array_slice($versions, 0, $i + 1));
-            $cmp = $this->inspector->compare($model);
-            if ($cmp['differences'] === []) {
-                $marked = array_slice($versions, 0, $i + 1);
-                foreach ($marked as $v) {
-                    $this->history->record($v, 'baseline');
-                }
-                $this->logger->info(
-                    "{$this->label}: a database without history matches {$versions[$i]->version} — "
-                    . count($marked) . ' version(s) recorded as baseline'
-                );
-                return self::actions($marked, 'baseline');
-            }
-            if ($i === count($versions) - 1) {
-                $firstDiff = $cmp['differences'];
-            }
+        $match = $this->baselineMatch($versions);
+        if ($match['matched'] === 0) {
+            throw new SchemaException(
+                "{$this->label}: the database has tables of the history but no history, and matches none of its "
+                . 'versions. Against the last one: ' . implode('; ', array_slice($match['differences'], 0, 10)) . '.'
+            );
         }
-        throw new SchemaException(
-            "{$this->label}: the database has tables of the history but no history, and matches none of its "
-            . 'versions. Against the last one: ' . implode('; ', array_slice($firstDiff ?? [], 0, 10)) . '.'
+        $marked = array_slice($versions, 0, $match['matched']);
+        foreach ($marked as $v) {
+            $this->history->record($v, 'baseline');
+        }
+        $this->logger->info(
+            "{$this->label}: a database without history matches {$versions[$match['matched'] - 1]->version} — "
+            . count($marked) . ' version(s) recorded as baseline'
         );
+        return self::actions($marked, 'baseline');
     }
 
     /** @return array{version: string, action: string, ms: int} */

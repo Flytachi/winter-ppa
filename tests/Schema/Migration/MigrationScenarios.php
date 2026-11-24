@@ -247,11 +247,32 @@ abstract class MigrationScenarios extends TestCase
         $this->db->exec("INSERT INTO orders (customer, note, total) VALUES ('Ann', 'from before', 5)");
         $this->v2();
 
+        // What `db migrate --dry` shows: V001 is there already — read, nothing written.
+        self::assertSame(['matched' => 1, 'differences' => []], $this->migrator()->baselineMatch());
+        self::assertSame([], $this->rows());
+
         $done = $this->migrator()->migrate();
 
         self::assertSame(['baseline', 'applied'], array_column($done, 'action'));
         self::assertSame(['from before'], $this->col('SELECT comment FROM orders'));
         self::assertSame([], $this->differences());
+    }
+
+    public function test_tables_of_no_version_are_refused_a_baseline_and_said_why(): void
+    {
+        $this->v1();
+        // Tables of no version: what V001 makes, less a column.
+        foreach (SchemaSql::create(SchemaModel::fold($this->history->versions()), $this->driver) as $sql) {
+            $this->db->exec($sql);
+        }
+        $this->db->exec('ALTER TABLE orders DROP COLUMN note');
+
+        $match = $this->migrator()->baselineMatch();
+        self::assertSame(0, $match['matched']);
+        self::assertNotSame([], $match['differences']);
+
+        $this->expectExceptionMessageMatches('/matches none of its versions/');
+        $this->migrator()->migrate();
     }
 
     public function test_the_history_keeps_a_copy_of_what_each_version_applied(): void
