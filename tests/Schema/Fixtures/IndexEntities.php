@@ -12,8 +12,10 @@ use Flytachi\Winter\Ppa\Mapping\Attributes\Constraint\ForeignKey;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Entity\Table;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Hybrid\Id;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Index;
+use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Primary;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Idx\Unique;
 use Flytachi\Winter\Ppa\Mapping\Attributes\Primal\{Integer, Json, Varchar};
+use Flytachi\Winter\Ppa\Mapping\Attributes\Sub\AutoIncrement;
 use Flytachi\Winter\Ppa\Mapping\Constants\{FKAction, IndexMethod};
 
 /** What every driver builds — with notices on MySQL / SQLite, never an error. */
@@ -196,4 +198,18 @@ class ArticleReservedColumns
 
     #[Integer]
     public int $rank = 0;
+}
+
+/** An id in a key of two columns: SQLite counts it only as the whole key. */
+#[Table]
+class ArticleIdInTwo
+{
+    #[Integer]
+    #[AutoIncrement]
+    #[Primary]
+    public ?int $id = null;
+
+    #[Varchar(20)]
+    #[Primary]
+    public string $lang = 'en';
 }

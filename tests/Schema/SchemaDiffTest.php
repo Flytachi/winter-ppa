@@ -9,6 +9,7 @@ use Flytachi\Winter\Ppa\Schema\SchemaDirectory;
 use Flytachi\Winter\Ppa\Schema\SchemaException;
 use Flytachi\Winter\Ppa\Schema\SchemaModel;
 use Flytachi\Winter\Ppa\Schema\SchemaSnapshot;
+use Flytachi\Winter\Ppa\Schema\SchemaSql;
 use Flytachi\Winter\Ppa\Tests\Schema\Fixtures as F;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -170,24 +171,21 @@ final class SchemaDiffTest extends TestCase
         self::assertSame($widens, SchemaDiff::widens($from, $to));
     }
 
-    public function test_sqlite_refuses_at_snapshot_what_it_cannot_do_by_itself(): void
+    public function test_sqlite_records_what_it_rebuilds_as_any_change(): void
     {
         $this->record(['customers' => F\CustomerV1::class, 'orders' => F\OrderV1::class], driver: 'sqlite');
-        // V2 adds a CHECK to orders: not by SQLite itself (ALTER TABLE … ADD CONSTRAINT is new
-        // to it, and a version is applied by any SQLite) — a custom version's code.
-        $v2 = ['customers' => F\CustomerV2::class, 'orders' => F\OrderV2::class];
-        self::assertStringContainsString('SQLite cannot add the check', implode("\n", $this->diff($v2, driver: 'sqlite')->errors));
-        $custom = $this->diff($v2, driver: 'sqlite', custom: true);
-        self::assertSame([], $custom->errors);
-        self::assertSame(['addConstraint'], array_column(array_filter($custom->changes, fn($c) => ($c['by'] ?? null) === 'code'), 'op'));
-        SchemaSnapshot::write($this->history, $custom, 'sqlite', 'v2', true);
+        // V2 adds a CHECK to orders: SQLite cannot by ALTER TABLE — the migrator rebuilds the
+        // table; the snapshot records it as on any server, no code asked for.
+        $v2 = $this->diff(['customers' => F\CustomerV2::class, 'orders' => F\OrderV2::class], driver: 'sqlite');
+        self::assertSame([], $v2->errors);
+        self::assertContains('addConstraint', array_column($v2->changes, 'op'));
+        self::assertSame([], array_filter($v2->changes, fn($c) => ($c['by'] ?? null) === 'code'));
+        SchemaSnapshot::write($this->history, $v2, 'sqlite', 'v2');
 
-        $diff = $this->diff(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class], driver: 'sqlite');
-
-        $all = implode("\n", $diff->errors);
-        self::assertStringContainsString('SQLite cannot change a column', $all, 'the wider total');
-        self::assertStringContainsString('SQLite cannot add the foreign key', $all);
-        self::assertSame([], $this->diff(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class], driver: 'sqlite', custom: true)->errors);
+        // a wider total and a foreign key: the same.
+        $v3 = $this->diff(['customers' => F\CustomerV2::class, 'orders' => F\OrderV3::class], driver: 'sqlite');
+        self::assertSame([], $v3->errors);
+        self::assertSame(['orders'], SchemaSql::rebuilt($v3->changes, 'sqlite'));
     }
 
     public function test_nothing_is_written_when_there_is_nothing_or_when_it_is_refused(): void

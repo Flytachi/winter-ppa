@@ -82,6 +82,9 @@ final class SchemaCheck
             if ($driver === 'mysql') {
                 array_push($errors, ...self::setDefault($table, $name));
             }
+            if ($driver === 'sqlite') {
+                array_push($errors, ...self::rowid($table, $name, $indexes));
+            }
         }
         return ['errors' => $errors, 'notices' => $notices];
     }
@@ -178,6 +181,34 @@ final class SchemaCheck
     }
 
     /**
+     * SQLite counts an id only as the whole primary key — `id INTEGER PRIMARY KEY
+     * AUTOINCREMENT`. In a key of two columns it is a plain column, and a row inserted
+     * without it breaks its NOT NULL.
+     *
+     * @param list<Index> $indexes Every index of the table, its primary key among them.
+     * @return list<string>
+     */
+    private static function rowid(Table $table, string $name, array $indexes): array
+    {
+        $key = [];
+        foreach ($indexes as $index) {
+            if ($index->type === IndexType::PRIMARY) {
+                array_push($key, ...array_values($index->columns));
+            }
+        }
+        $key = array_values(array_unique($key));
+        $errors = [];
+        foreach ($table->columns as $column) {
+            if (SchemaSql::autoincrement((string) $column->type) && $key !== [$column->name]) {
+                $errors[] = "{$name}.{$column->name}: SQLite counts an id only as the whole primary key — in ("
+                    . implode(', ', $key) . ') it is not counted, a row without it fails. Make it the primary '
+                    . 'key alone, or give the ids yourself (`#[Integer]`).';
+            }
+        }
+        return $errors;
+    }
+
+    /**
      * A name the server takes for its own: ppa writes names unquoted, the server refuses the
      * statement — `CREATE TABLE groups` on MySQL 8 — at migrate, after the snapshot is written.
      *
@@ -188,6 +219,7 @@ final class SchemaCheck
         $server = match ($driver) {
             'mysql' => 'MySQL / MariaDB',
             'pgsql' => 'PostgreSQL',
+            'sqlite' => 'SQLite',
             default => $driver,
         };
         $errors = [];

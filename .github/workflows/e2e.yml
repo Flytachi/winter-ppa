@@ -157,3 +157,36 @@ jobs:
 
       - name: E2E — variants A, B, C, the refusals, a version killed midway
         run: php e2e/run.php
+
+  sqlite:
+    name: SQLite · PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5']
+
+    env:
+      E2E_STOP: ${{ github.event.inputs.stop }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: E2E — the SQLite of the runner
+        run: E2E_SQLITE=$RUNNER_TEMP/e2e.sqlite php e2e/run.php
+
+      # What PHP ships on most servers: SQLite 3.40 (Debian 12) — no ALTER TABLE ADD CONSTRAINT.
+      - name: E2E — SQLite 3.40 (php:8.4-cli-bookworm)
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app -e E2E_SQLITE=/tmp/e2e.sqlite -e E2E_STOP \
+            php:8.4-cli-bookworm php e2e/run.php

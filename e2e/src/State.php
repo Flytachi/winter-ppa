@@ -153,6 +153,10 @@ final readonly class State
         $baseShort = substr($base, (int) strrpos($base, '\\') + 1);
         $config = self::configName($driver);
         $env = $driver->env();
+        $setUp = $driver->name() === 'sqlite'
+            ? "\$this->path = (string) getenv('{$env}');"
+            : "[\$this->host, \$port, \$this->database, \$this->username, \$this->password] = explode(':', (string) getenv('{$env}'));"
+                . " \$this->port = (int) \$port;";
         $ext = implode("\n", array_map(fn($args) => "#[Extension({$args})]", $this->extensions));
         $out = <<<PHP
             <?php
@@ -182,9 +186,7 @@ final readonly class State
             {
                 public function setUp(): void
                 {
-                    [\$this->host, \$port, \$this->database, \$this->username, \$this->password]
-                        = explode(':', (string) getenv('{$env}'));
-                    \$this->port = (int) \$port;
+                    {$setUp}
                 }
             }
 

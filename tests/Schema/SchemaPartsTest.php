@@ -102,10 +102,36 @@ final class SchemaPartsTest extends TestCase
         self::assertStringContainsString('CONSTRAINT fk_c FOREIGN KEY (c) REFERENCES customers(id)', $plan[0]['sql'][0]);
     }
 
-    public function test_sqlite_refuses_what_is_a_table_rebuild(): void
+    public function test_what_sqlite_cannot_alter_is_a_rebuild_of_its_table(): void
     {
-        $this->expectExceptionMessageMatches('/SQLite cannot add the foreign key fk_c to a table that exists/');
-        SchemaSql::change(['op' => 'addConstraint', 'table' => 'orders', 'name' => 'fk_c', 'kind' => 'foreign', 'sql' => '…'], 'sqlite');
+        $changes = [
+            ['op' => 'createTable', 'table' => 'tags', 'columns' => [], 'primaryKey' => []],
+            ['op' => 'addConstraint', 'table' => 'tags', 'name' => 'chk_t', 'kind' => 'check', 'sql' => '…'],
+            ['op' => 'addConstraint', 'table' => 'orders', 'name' => 'fk_c', 'kind' => 'foreign', 'sql' => '…'],
+            ['op' => 'addIndex', 'table' => 'orders', 'name' => 'orders_x_idx', 'sql' => '…'],
+            ['op' => 'renameColumn', 'table' => 'orders', 'from' => 'a', 'to' => 'b'],
+        ];
+        // tags is made by the version: its check goes inside the CREATE TABLE, nothing rebuilt.
+        self::assertSame(['orders'], SchemaSql::rebuilt($changes, 'sqlite'));
+        self::assertSame([], SchemaSql::rebuilt($changes, 'pgsql'));
+        self::assertSame([], SchemaSql::change($changes[2], 'sqlite'), 'no statement of its own');
+        self::assertTrue(SchemaSql::byRebuild($changes[3], ['orders']), 'the rebuild makes the indexes');
+        self::assertFalse(SchemaSql::byRebuild($changes[4], ['orders']), 'a rename runs before it');
+
+        $model = ['columns' => [
+            'id' => ['name' => 'id', 'type' => 'INTEGER AUTOINCREMENT', 'nullable' => false, 'default' => null],
+            'b' => ['name' => 'b', 'type' => 'TEXT', 'nullable' => true, 'default' => null],
+            'c' => ['name' => 'c', 'type' => 'TEXT', 'nullable' => true, 'default' => null],
+        ], 'primaryKey' => ['id'], 'indexes' => ['orders_b_idx' => 'CREATE INDEX orders_b_idx ON orders (b)'], 'constraints' => [
+            'chk_b' => ['kind' => 'check', 'sql' => "ALTER TABLE orders ADD CONSTRAINT chk_b CHECK (b <> '')"],
+        ]];
+        self::assertSame([
+            "CREATE TABLE orders__ppa_new (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    b TEXT,\n    c TEXT,\n    CONSTRAINT chk_b CHECK (b <> '')\n)",
+            'INSERT INTO orders__ppa_new (id, b) SELECT id, b FROM orders',   // c is new: its default
+            'DROP TABLE orders',
+            'ALTER TABLE orders__ppa_new RENAME TO orders',
+            'CREATE INDEX orders_b_idx ON orders (b)',
+        ], SchemaSql::rebuild('orders', $model, ['id', 'a_dropped', 'b']));
     }
 
     public function test_a_fresh_database_gets_tables_then_indexes_then_constraints_without_detached_columns(): void
@@ -416,5 +442,19 @@ final class SchemaPartsTest extends TestCase
             ["ALTER TABLE orders ADD COLUMN note TEXT NOT NULL DEFAULT ('')"],
             SchemaSql::change(['op' => 'addColumn', 'table' => 'orders', 'column' => $note], 'mysql'),
         );
+    }
+
+    public function test_a_sqlite_id_is_autoincrement_as_the_primary_key(): void
+    {
+        $id = ['name' => 'id', 'type' => 'INTEGER AUTOINCREMENT', 'nullable' => false, 'default' => null];
+        $name = ['name' => 'name', 'type' => 'TEXT', 'nullable' => true, 'default' => null];
+
+        self::assertSame(
+            "CREATE TABLE t (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT\n)",
+            SchemaSql::createTable('t', [$id, $name], ['id'], 'sqlite'),
+        );
+        // The mark is SQLite's type only: never written as it is.
+        self::assertSame('id INTEGER NOT NULL', SchemaSql::columnDef($id, 'sqlite'));
+        self::assertSame(['INTEGER', 'AUTOINCREMENT'], \Flytachi\Winter\Ppa\Schema\SchemaDiff::base('INTEGER AUTOINCREMENT'));
     }
 }

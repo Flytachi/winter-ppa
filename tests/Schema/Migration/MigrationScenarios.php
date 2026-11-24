@@ -181,6 +181,12 @@ abstract class MigrationScenarios extends TestCase
         $v = $this->snapshot(['customers' => F\CustomerV1::class, 'orders' => F\OrderNarrowTotal::class], 'narrow_total', custom: true);
         $this->code($v);                                // after() makes nothing of what is left to it
 
+        if ($this->driver === 'sqlite') {
+            // SQLite rebuilds the table to its model: the type is the model's without the code.
+            self::assertSame('applied', $this->migrator()->migrate()[0]['action']);
+            self::assertSame([], $this->differences());
+            return;
+        }
         try {
             $this->migrator()->migrate();
             self::fail('the database differs from the model');
@@ -478,33 +484,12 @@ abstract class MigrationScenarios extends TestCase
     }
 
     /**
-     * What V2's after() does: the status of the big orders — and on SQLite the CHECK on the
-     * total, which it cannot add to a table that exists ("by": "code"): the table rebuilt.
+     * What V2's after() does: the status of the big orders.
      */
     protected function v2After(SchemaVersionFile $v): string
     {
         $code = "\$db->exec(\"UPDATE orders SET status = 'done' WHERE total > 100\");";
-        return $this->driver === 'sqlite' ? $code . $this->sqliteRebuild('orders') : $code;
-    }
-
-    /**
-     * A table rebuilt the SQLite way, as a version's code does it: the new table from the
-     * model (its constraints inside the CREATE TABLE, named), the rows copied, the old
-     * dropped, its indexes made again.
-     */
-    protected function sqliteRebuild(string $table): string
-    {
-        $model = [$table => SchemaModel::fold($this->history->versions())[$table]];
-        $sql = SchemaSql::create($model, 'sqlite');
-        $columns = implode(', ', array_keys(SchemaModel::live($model)[$table]['columns']));
-        $steps = [
-            "ALTER TABLE {$table} RENAME TO {$table}_old",
-            $sql[0],
-            "INSERT INTO {$table} ({$columns}) SELECT {$columns} FROM {$table}_old",
-            "DROP TABLE {$table}_old",
-            ...array_slice($sql, 1),
-        ];
-        return implode('', array_map(fn(string $q) => ' $db->exec(' . var_export($q, true) . ');', $steps));
+        return $code;       // SQLite's CHECK too: the migrator rebuilds the table
     }
 
     /** V3: a foreign key to customers, a wider total — not on SQLite (it cannot alter either). */

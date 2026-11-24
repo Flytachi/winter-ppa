@@ -53,7 +53,7 @@ final class SchemaSql
             'addIndex'       => [$c['sql']],
             'dropIndex'      => [self::dropIndex($t, $c['name'], $driver)],
             'addConstraint'  => self::addConstraint($t, $c, $driver),
-            'dropConstraint' => [self::dropConstraint($t, $c['name'], $c['kind'], $driver)],
+            'dropConstraint' => array_filter([self::dropConstraint($t, $c['name'], $c['kind'], $driver)]),
             'setPrimaryKey'  => throw new SchemaException("{$t}: a primary key is changed by the version's code."),
             default          => throw new SchemaException("Unknown change '{$c['op']}'."),
         };
@@ -120,12 +120,89 @@ final class SchemaSql
     public static function columnDef(array $c, ?string $driver = null): string
     {
         $c = SchemaModel::column($c);
+        if (self::autoincrement($c['type'])) {
+            $c['type'] = 'INTEGER';     // SQLite's mark: said on the primary key only ({@see createTable()})
+        }
         return trim(implode(' ', array_filter([
             $c['name'],
             $c['type'],
             $c['nullable'] ? '' : 'NOT NULL',
             $c['default'] !== null ? 'DEFAULT ' . self::defaultValue($c['type'], $c['default'], $driver) : '',
         ])));
+    }
+
+    /** What SQLite cannot change in a table that exists: the table is rebuilt for it. */
+    private const array REBUILT = ['alterColumn', 'addConstraint', 'dropConstraint', 'setPrimaryKey'];
+
+    /** What a rebuild makes as the model says — not run on its own on a table rebuilt. */
+    private const array BY_REBUILD = [...self::REBUILT, 'addIndex', 'dropIndex', 'addColumn', 'dropColumn'];
+
+    /**
+     * The tables of a version SQLite rebuilds: those with a change it cannot make on a table
+     * that exists — a column changed, a check or a foreign key added or dropped, the primary
+     * key. A table the version creates or drops is none.
+     *
+     * @param list<array> $changes
+     * @return list<string>
+     */
+    public static function rebuilt(array $changes, string $driver): array
+    {
+        if ($driver !== 'sqlite') {
+            return [];
+        }
+        $made = [];
+        foreach ($changes as $c) {
+            if (in_array($c['op'], ['createTable', 'dropTable'], true)) {
+                $made[$c['table']] = true;
+            }
+        }
+        $tables = [];
+        foreach ($changes as $c) {
+            if (in_array($c['op'], self::REBUILT, true) && !isset($made[$c['table']])) {
+                $tables[$c['table']] = $c['table'];
+            }
+        }
+        return array_values($tables);
+    }
+
+    /** Whether a change is made by the rebuild of its table, not on its own. */
+    public static function byRebuild(array $change, array $rebuilt): bool
+    {
+        return in_array($change['op'], self::BY_REBUILD, true) && in_array($change['table'] ?? null, $rebuilt, true);
+    }
+
+    /**
+     * A SQLite table rebuilt to its model — the procedure SQLite documents for what ALTER
+     * TABLE cannot do: the new table made beside it, the rows copied (the columns both
+     * have), the old one dropped, the new one renamed to its name, its indexes made. Foreign
+     * keys are off meanwhile ({@see SchemaMigrator}): a DROP TABLE would delete, or cascade
+     * into, the rows that point at it.
+     *
+     * @param array $model The table in the version's model.
+     * @param list<string> $have The columns the table has now.
+     * @return list<string>
+     */
+    public static function rebuild(string $table, array $model, array $have): array
+    {
+        $sql = self::create([$table => $model], 'sqlite');
+        $new = "{$table}__ppa_new";
+        $head = '/^CREATE TABLE ' . preg_quote($table, '/') . ' \(/';
+        $create = (string) preg_replace($head, "CREATE TABLE {$new} (", $sql[0], 1);
+        $want = array_keys(SchemaModel::live([$table => $model])[$table]['columns']);
+        $columns = implode(', ', array_values(array_intersect($want, $have)));
+        return [
+            $create,
+            "INSERT INTO {$new} ({$columns}) SELECT {$columns} FROM {$table}",
+            "DROP TABLE {$table}",
+            "ALTER TABLE {$new} RENAME TO {$table}",
+            ...array_slice($sql, 1),
+        ];
+    }
+
+    /** SQLite's `INTEGER AUTOINCREMENT` — the type of an auto-incremented id there. */
+    public static function autoincrement(string $type): bool
+    {
+        return (bool) preg_match('/^INTEGER\s+AUTOINCREMENT$/i', trim($type));
     }
 
     /**
@@ -154,8 +231,19 @@ final class SchemaSql
         string $driver,
         array $constraints = [],
     ): string {
-        $lines = array_map(fn(array $c) => '    ' . self::columnDef($c, $driver), $columns);
-        if ($primaryKey !== []) {
+        // SQLite: AUTOINCREMENT is said on the column, which is the primary key then.
+        $rowid = null;
+        if ($driver === 'sqlite' && count($primaryKey) === 1) {
+            foreach ($columns as $c) {
+                if ($c['name'] === $primaryKey[0] && self::autoincrement($c['type'])) {
+                    $rowid = $c['name'];
+                }
+            }
+        }
+        $lines = array_map(fn(array $c) => '    ' . ($c['name'] === $rowid
+            ? "{$c['name']} INTEGER PRIMARY KEY AUTOINCREMENT"
+            : self::columnDef($c, $driver)), $columns);
+        if ($primaryKey !== [] && $rowid === null) {
             $lines[] = '    PRIMARY KEY (' . implode(', ', $primaryKey) . ')';
         }
         foreach ($constraints as $sql) {
@@ -180,9 +268,7 @@ final class SchemaSql
         $to = SchemaModel::column($to);
         $name = $from['name'];
         if ($driver === 'sqlite') {
-            throw new SchemaException(
-                "{$t}.{$name}: SQLite cannot change a column — the table is rebuilt in the version's code."
-            );
+            return [];      // the table is rebuilt ({@see rebuild()})
         }
         if ($driver === 'mysql') {
             return ["ALTER TABLE {$t} MODIFY COLUMN " . self::columnDef($to, $driver)];
@@ -322,11 +408,7 @@ final class SchemaSql
         // any, and ALTER TABLE … ADD CONSTRAINT is new to SQLite (3.54 has it, the SQLite PHP
         // ships on most servers does not).
         if ($driver === 'sqlite') {
-            $what = $c['kind'] === 'foreign' ? 'foreign key' : 'check';
-            throw new SchemaException(
-                "{$t}: SQLite cannot add the {$what} {$c['name']} to a table that exists — "
-                . "the table is rebuilt in the version's code."
-            );
+            return [];      // the table is rebuilt ({@see rebuild()})
         }
         return [$c['sql']];
     }
@@ -338,9 +420,7 @@ final class SchemaSql
             'mysql' => $kind === 'foreign'
                 ? "ALTER TABLE {$t} DROP FOREIGN KEY {$name}"
                 : "ALTER TABLE {$t} DROP CONSTRAINT {$name}",
-            default => throw new SchemaException(
-                "{$t}: SQLite cannot drop the constraint {$name} — the table is rebuilt in the version's code."
-            ),
+            default => '',  // SQLite: the table is rebuilt ({@see rebuild()})
         };
     }
 }

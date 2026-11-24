@@ -53,10 +53,11 @@ final readonly class AutoIncrement implements AttributeDbSubType
             // becomes one when its type is spelled exactly INTEGER — INT, BIGINT and
             // SMALLINT are ordinary columns that would reject the omitted value with
             // a NOT NULL violation. There is one integer width anyway (64-bit), so
-            // widening the declared type loses nothing. The AUTOINCREMENT keyword is
-            // deliberately not emitted: it only forbids reusing ids after a delete,
-            // at the cost of an extra bookkeeping table.
-            'sqlite' => 'INTEGER',
+            // widening the declared type loses nothing. AUTOINCREMENT forbids reusing
+            // the id of a deleted last row — as every other server does: the table is
+            // written `id INTEGER PRIMARY KEY AUTOINCREMENT` (SchemaSql::createTable),
+            // which takes the column to be the whole primary key.
+            'sqlite' => 'INTEGER AUTOINCREMENT',
             default => $type . ' AUTO_INCREMENT',
         };
     }

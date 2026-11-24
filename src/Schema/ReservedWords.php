@@ -9,7 +9,8 @@ namespace Flytachi\Winter\Ppa\Schema;
  * column of such a name is refused by the server at migrate, so {@see SchemaCheck} says it at
  * the snapshot. Read from the servers themselves: MySQL 8.4 and 9.7 (`information_schema.KEYWORDS`,
  * reserved), MariaDB 11.8 (its keywords a table cannot be named), PostgreSQL 18
- * (`pg_get_keywords()`, reserved and type-or-function names). `mysql` is both of the first.
+ * (`pg_get_keywords()`, reserved and type-or-function names), SQLite 3.40 (the keywords of
+ * all three it refuses as a table or a column name). `mysql` is both of the first.
  */
 final class ReservedWords
 {
@@ -61,6 +62,14 @@ final class ReservedWords
         'with',
     ];
 
+    private const array SQLITE = [
+        'add', 'all', 'alter', 'and', 'as', 'between', 'case', 'check', 'collate', 'commit', 'constraint', 'create',
+        'default', 'deferrable', 'delete', 'distinct', 'drop', 'else', 'escape', 'except', 'exists', 'foreign',
+        'from', 'group', 'having', 'if', 'in', 'index', 'insert', 'intersect', 'into', 'is', 'isnull', 'join',
+        'limit', 'not', 'notnull', 'null', 'on', 'or', 'order', 'primary', 'references', 'returning', 'select',
+        'set', 'table', 'then', 'to', 'transaction', 'union', 'unique', 'update', 'using', 'values', 'when', 'where',
+    ];
+
     private function __construct()
     {
     }
@@ -72,6 +81,7 @@ final class ReservedWords
         $sets[$driver] ??= array_flip(match ($driver) {
             'mysql' => self::MYSQL,
             'pgsql' => self::PGSQL,
+            'sqlite' => self::SQLITE,
             default => [],
         });
         return isset($sets[$driver][strtolower($name)]);

@@ -200,11 +200,12 @@ final class SchemaMigrator
         $t0 = hrtime(true);
         $run = function () use ($v, $after, $t0): void {
             $plan = SchemaSql::plan($v->changes, $this->driver);
+            $rebuilt = SchemaSql::rebuilt($v->changes, $this->driver);
             $code = $v->code();
             $code?->before($this->db);
             $this->inspector->forget();
             foreach ($plan as ['change' => $change, 'sql' => $sql]) {
-                if ($sql === []) {
+                if ($sql === [] || SchemaSql::byRebuild($change, $rebuilt)) {
                     continue;
                 }
                 if ($this->inspector->isApplied($change)) {
@@ -220,13 +221,26 @@ final class SchemaMigrator
                 $this->inspector->forget();
             }
             $this->dropKeyIndexes($v, $after);
+            foreach ($rebuilt as $table) {
+                $have = array_keys($this->inspector->table($table)['columns'] ?? []);
+                foreach (SchemaSql::rebuild($table, $after[$table], $have) as $statement) {
+                    $this->run($statement);
+                }
+                $this->inspector->forget();
+                $this->logger->debug("{$this->label}: {$v->version} {$table} rebuilt");
+            }
             $code?->after($this->db);
             $this->inspector->forget();
             $this->verify($after, $v);
+            if ($rebuilt !== []) {
+                $this->foreignKeysHold();
+            }
             $this->history->record($v, 'applied', self::ms($t0));
         };
         try {
-            if ($this->transactional()) {
+            if (SchemaSql::rebuilt($v->changes, $this->driver) !== []) {
+                $this->withoutForeignKeys(fn() => $this->transaction($run));
+            } elseif ($this->transactional()) {
                 $this->transaction($run);
             } else {
                 $this->history->record($v, 'running');
@@ -379,6 +393,50 @@ final class SchemaMigrator
             );
         }
         $this->db->exec($statement);
+    }
+
+    /**
+     * SQLite, a table rebuilt: foreign keys off around the version's transaction — inside one
+     * the pragma does nothing, and a DROP TABLE with them on deletes the rows that point at it
+     * (or cascades into them). Back as they were after.
+     */
+    private function withoutForeignKeys(callable $work): void
+    {
+        $on = (bool) $this->db->query('PRAGMA foreign_keys')->fetchColumn();
+        if ($on) {
+            $this->db->exec('PRAGMA foreign_keys = OFF');
+        }
+        try {
+            $work();
+        } finally {
+            if ($on) {
+                $this->db->exec('PRAGMA foreign_keys = ON');
+            }
+        }
+    }
+
+    /**
+     * After a rebuild, with foreign keys off: every row still points at a row — or the version
+     * rolls back, saying where.
+     *
+     * @throws SchemaException
+     */
+    private function foreignKeysHold(): void
+    {
+        $broken = $this->db->query('PRAGMA foreign_key_check')->fetchAll(\PDO::FETCH_ASSOC);
+        if ($broken === []) {
+            return;
+        }
+        $where = [];
+        foreach ($broken as $row) {
+            $key = "{$row['table']} → {$row['parent']}";
+            $where[$key] = ($where[$key] ?? 0) + 1;
+        }
+        throw new SchemaException('rows point at no row after the rebuild: ' . implode(', ', array_map(
+            fn(string $k, int $n) => "{$k} ({$n})",
+            array_keys($where),
+            $where,
+        )) . ' — clear them in before().');
     }
 
     /** PostgreSQL and SQLite roll a schema change back; MySQL and MariaDB commit it at once. */

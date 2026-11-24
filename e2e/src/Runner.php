@@ -216,8 +216,23 @@ final class Runner
             '/' . self::v(count($this->steps) + 1) . "_flag failed and was {$how}: no luck/",
             fix: '// fixed',
         );
-        $narrow = $last->attrs('users', 'locale', fn($a) => ['#[Varchar(5)]']);
-        $this->failingVersion('code that leaves the database wrong', new Step(4, 'narrow_locale', $narrow, '', custom: true), '/differs from its model.*users\.locale/s');
+        if ($this->driver->name() === 'sqlite') {
+            // A rebuild runs with foreign keys off: a row pointing at no row is found after it.
+            $this->failingVersion(
+                'a rebuild over a row that points at no row',
+                new Step(4, 'wider_locale', $last->attrs('users', 'locale', fn($a) => Scenario::swap($a, '#[Varchar(10)]', '#[Varchar(20)]')), '', custom: true, before: "\$db->exec(\"INSERT INTO order_notes (order_id, body) VALUES (99999, 'lost')\");"),
+                '/rows point at no row after the rebuild: order_notes → orders \(1\)/',
+            );
+            // A narrowing left to the code is made by SQLite's rebuild: code that undoes a step is not.
+            $this->failingVersion(
+                'code that leaves the database wrong',
+                new Step(4, 'flag_lost', $flag->attrs('users', 'flag', fn($a) => [...$a, '#[Index]']), '', custom: true, after: "\$db->exec('DROP INDEX users_flag_idx');"),
+                '/differs from its model.*users_flag_idx/s',
+            );
+        } else {
+            $narrow = $last->attrs('users', 'locale', fn($a) => ['#[Varchar(5)]']);
+            $this->failingVersion('code that leaves the database wrong', new Step(4, 'narrow_locale', $narrow, '', custom: true), '/differs from its model.*users\.locale/s');
+        }
         if (!$tx) {
             $this->stoppedMidway($last);
         }

@@ -94,6 +94,19 @@ All notable changes to this project are documented here. The format follows
 - **`snapshot` refuses what MySQL / MariaDB would make otherwise than declared**: `ON UPDATE` /
   `ON DELETE SET DEFAULT` (InnoDB makes the key without it, silently).
 - **E2E on MySQL 8.4 and 9.7** — the scenario of MariaDB, one driver to ppa.
+- **SQLite: a table is rebuilt for what ALTER TABLE cannot do** — a column changed, a check or a
+  foreign key added or dropped, the primary key changed. A plain snapshot records it as on any
+  server; at migrate the table is made anew from the version's model (the procedure SQLite
+  documents: new table, rows copied, old dropped, new renamed, indexes), with foreign keys off
+  around the version and `PRAGMA foreign_key_check` before it commits. Before, the snapshot asked
+  for a custom version whose code rebuilt the table by hand.
+- ⚠️ **SQLite: ids are `INTEGER PRIMARY KEY AUTOINCREMENT`** — the id of a deleted last row is not
+  given again, as on every other server. A table made by `call db migrate` of 4.x keeps its ids
+  as they were (its baseline is taken as it is). An auto-incremented id in a key of two columns is refused at the snapshot:
+  SQLite counts it only as the whole key.
+- **E2E on SQLite** — the runner's and 3.40 (Debian 12, what most servers have): the life of
+  PostgreSQL with SQLite's rebuilds, foreign keys on; a row left pointing at no row by a rebuild
+  rolls the version back.
 - **`snapshot` refuses a table or a column named by a word of the server** — ppa writes names
   unquoted, and the server refused the statement at migrate, after the version was written:
   `CREATE TABLE groups` on MySQL 8. The words are the servers' own (MySQL 8.4 / 9.7, MariaDB 11.8,
@@ -101,6 +114,12 @@ All notable changes to this project are documented here. The format follows
 - **`snapshot` refuses an index of a column the entity has not** — a column renamed, its index
   in another property still naming the old one: a live database renamed it along, a fresh one
   failed on `Key column … doesn't exist`.
+
+### Changed
+
+- ⚠️ **Requires `flytachi/winter-cdo` ^4.2** — its SQLite connection checks foreign keys
+  (`PRAGMA foreign_keys = ON`): what the entities declare as a key holds on SQLite too, and the
+  migrator's table rebuilds keep every row pointing at one.
 
 ### Fixed
 
@@ -126,9 +145,8 @@ All notable changes to this project are documented here. The format follows
   next is easily written without it. The snapshot says so now, with the `use` to add.
 - **SQLite: a CHECK added to a table that exists was `ALTER TABLE … ADD CONSTRAINT`** — new to
   SQLite (3.54 has it; 3.40–3.46, what PHP ships on most servers and CI runners, says "syntax
-  error"). A version is recorded once and applied by any SQLite, so it is now refused like a
-  foreign key: a custom version rebuilds the table (`"by": "code"`); a table the version creates
-  still gets it inside its CREATE TABLE. And the check after a version now compares SQLite's
+  error"). A version is recorded once and applied by any SQLite, so the table is rebuilt instead
+  (see Added); a table the version creates still gets it inside its CREATE TABLE. And the check after a version now compares SQLite's
   constraints too (by name, from its CREATE TABLE): a rebuild that forgot one fails the version.
 - **PostgreSQL 18: a renamed column kept its NOT NULL constraint's old name** — 18 keeps NOT NULL as
   a constraint named after the column (`orders_user_id_not_null`) and does not rename it with the
@@ -165,9 +183,8 @@ All notable changes to this project are documented here. The format follows
 version that fails half-way is recorded `failed`, and runs again from its start next time — its
 done steps are skipped, its code must be safe to repeat.
 
-**On SQLite** a version cannot change a column, add a foreign key to an existing table or drop a
-constraint by itself: a snapshot says so and asks for a custom version (a table rebuild in
-`after()`).
+**On SQLite** a table ALTER TABLE cannot change is rebuilt — its triggers and views, which ppa
+does not know, are not made again.
 
 ### Known issues (not fixed yet, to decide)
 

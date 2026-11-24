@@ -75,6 +75,7 @@ final class SchemaCheckTest extends TestCase
         yield 'partial unique on MySQL' => [F\ArticleUniqueWhere::class, 'mysql', 'the unique index would hold over every row'];
         yield 'two indexes of one name' => [F\ArticleTwinIndexes::class, 'pgsql', 'two indexes are named articles_title_idx'];
         yield 'an index of no column' => [F\ArticleIndexOfNoColumn::class, 'pgsql', 'slug_old is no column of articles — renamed or gone?'];
+        yield 'an id in a key of two on SQLite' => [F\ArticleIdInTwo::class, 'sqlite', 'articles.id: SQLite counts an id only as the whole primary key — in (id, lang)'];
         yield 'SET DEFAULT on MySQL' => [F\ArticleSetDefault::class, 'mysql', 'articles.author_id: ON UPDATE SET DEFAULT is not kept by MySQL / MariaDB'];
     }
 
@@ -88,7 +89,8 @@ final class SchemaCheckTest extends TestCase
         // PostgreSQL has neither `groups` nor `rank`; `order` it keeps.
         $pg = SchemaCheck::tables(F\SchemaFixtures::tables('pgsql', ['groups' => F\ArticleReservedColumns::class]), 'pgsql')['errors'];
         self::assertSame(['groups.order: `order` is a word of PostgreSQL — the server refuses it as a column name. Name the property otherwise.'], $pg);
-        self::assertSame([], SchemaCheck::tables(F\SchemaFixtures::tables('sqlite', ['groups' => F\ArticleReservedColumns::class]), 'sqlite')['errors']);
+        // SQLite: `order` too, `groups` and `rank` it takes.
+        self::assertSame(['groups.order: `order` is a word of SQLite — the server refuses it as a column name. Name the property otherwise.'], SchemaCheck::tables(F\SchemaFixtures::tables('sqlite', ['groups' => F\ArticleReservedColumns::class]), 'sqlite')['errors']);
     }
 
     public function test_set_default_is_kept_by_postgresql(): void

@@ -479,7 +479,7 @@ final class SchemaDiff
     public static function base(string $type): array
     {
         $type = strtoupper(trim($type));
-        if (preg_match('/^(.*?)\s+(GENERATED\b.*|AUTO_INCREMENT\b.*)$/', $type, $m)) {
+        if (preg_match('/^(.*?)\s+(GENERATED\b.*|AUTO_INCREMENT\b.*|AUTOINCREMENT\b.*)$/', $type, $m)) {
             return [trim($m[1]), trim($m[2])];
         }
         return [$type, ''];

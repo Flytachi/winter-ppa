@@ -5,6 +5,7 @@
 //   E2E_PG=127.0.0.1:5432:e2e:postgres:test php e2e/run.php
 //   E2E_MARIA=127.0.0.1:3306:e2e:root:test php e2e/run.php
 //   E2E_MYSQL=127.0.0.1:3306:e2e:root:test php e2e/run.php
+//   E2E_SQLITE=/tmp/e2e.sqlite php e2e/run.php
 //   E2E_STOP=7   variant C stops at stage-3 #7 (5–9; random when not given)
 //
 // The database is emptied: give it one of its own.
@@ -21,11 +22,12 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-// The database: one of these set, host:port:database:user:password.
+// The database: one of these set, host:port:database:user:password — for SQLite a file.
 $drivers = [
     'E2E_PG' => Flytachi\Winter\Ppa\E2e\PgDriver::class,
     'E2E_MARIA' => Flytachi\Winter\Ppa\E2e\MariaDriver::class,
     'E2E_MYSQL' => Flytachi\Winter\Ppa\E2e\MysqlDriver::class,
+    'E2E_SQLITE' => Flytachi\Winter\Ppa\E2e\SqliteDriver::class,
 ];
 $given = array_keys(array_filter(array_map(static fn(string $env) => getenv($env) !== false, array_combine(array_keys($drivers), array_keys($drivers)))));
 if (count($given) !== 1) {

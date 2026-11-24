@@ -101,6 +101,9 @@ final class Table implements StructureInterface
         }
 
         $internalStatements = $this->mergePrimaryKeys($internalStatements);
+        if ($dialect === 'sqlite') {
+            [$columnDefinitions, $internalStatements] = self::sqliteRowid($columnDefinitions, $internalStatements);
+        }
         $body = implode(",\n", array_merge($columnDefinitions, $internalStatements));
         $tableSql = sprintf("CREATE TABLE %s (\n%s\n);", $tableName, $body);
 
@@ -109,6 +112,34 @@ final class Table implements StructureInterface
         }
 
         return $tableSql;
+    }
+
+    /**
+     * SQLite says AUTOINCREMENT on the column, as the primary key: `id INTEGER PRIMARY KEY
+     * AUTOINCREMENT`, no `PRIMARY KEY (id)` beside it. Elsewhere the mark goes.
+     *
+     * @return array{list<string>, list<string>}
+     */
+    private static function sqliteRowid(array $columns, array $constraints): array
+    {
+        $key = null;
+        foreach ($constraints as $i => $line) {
+            if (preg_match('/^\s*PRIMARY KEY\s*\(\s*(\w+)\s*\)$/i', $line, $m)) {
+                $key = [$i, $m[1]];
+            }
+        }
+        foreach ($columns as $j => $line) {
+            if (!preg_match('/^(\s*)(\w+) INTEGER AUTOINCREMENT\b/i', $line, $m)) {
+                continue;
+            }
+            if ($key !== null && $key[1] === $m[2]) {
+                $columns[$j] = "{$m[1]}{$m[2]} INTEGER PRIMARY KEY AUTOINCREMENT";
+                unset($constraints[$key[0]]);
+            } else {
+                $columns[$j] = (string) preg_replace('/ INTEGER AUTOINCREMENT\b/i', ' INTEGER', $line, 1);
+            }
+        }
+        return [$columns, array_values($constraints)];
     }
 
     private function mergePrimaryKeys(array $constraints): array

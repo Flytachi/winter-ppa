@@ -111,8 +111,8 @@ It never guesses; each refusal names what to write.
   the model: later diffs leave it alone, a fresh database does not get it);
 - a NOT NULL column with no default added to an existing table → error (its rows have no value);
 - a type change that is not a widening, a primary key change → only in a custom version, `"by": "code"`;
-- what the driver cannot do itself (SQLite: alter a column, add a foreign key or a check to an
-  existing table, drop a constraint) → `SchemaSnapshot::diff()` tries `SchemaSql` on each change and says so.
+- what the driver cannot do itself → `SchemaSnapshot::diff()` tries `SchemaSql` on each change and says
+  so. SQLite's ALTER TABLE limits are no such thing: the migrator rebuilds the table (below).
 
 Widening (`SchemaDiff::widens()`): a longer VARCHAR, VARCHAR → TEXT, SMALLINT → INT → BIGINT, a
 DECIMAL with as many digits on each side of the point or more. An identity / AUTO_INCREMENT that
@@ -152,10 +152,20 @@ version recorded as done is checked against its checksum.
 | --- | --- | --- | --- |
 | transaction per version | yes | no (DDL commits) | yes |
 | lock | `pg_advisory_lock` (`lock_timeout`) | `GET_LOCK` | none (the writer takes the file) |
-| alter a column | TYPE / SET / DROP each | `MODIFY COLUMN` | refused — rebuild in code |
-| foreign key / check on an existing table | `ALTER TABLE` | `ALTER TABLE` | refused — rebuild in code (`ADD CONSTRAINT` is new to SQLite: 3.54 has it, the SQLite PHP ships on most servers does not, and a version is applied by any); inside CREATE TABLE when the version creates the table |
-| drop a constraint | `DROP CONSTRAINT` | `DROP FOREIGN KEY` / `DROP CONSTRAINT` | refused |
+| alter a column | TYPE / SET / DROP each | `MODIFY COLUMN` | the table rebuilt |
+| foreign key / check on an existing table | `ALTER TABLE` | `ALTER TABLE` | the table rebuilt (`ADD CONSTRAINT` is new to SQLite: 3.54 has it, the SQLite PHP ships on most servers does not, and a version is applied by any); inside CREATE TABLE when the version creates the table |
+| drop a constraint, change the primary key | `DROP CONSTRAINT` | `DROP FOREIGN KEY` / `DROP CONSTRAINT` | the table rebuilt |
+| an auto-incremented id | identity | `AUTO_INCREMENT` | `INTEGER PRIMARY KEY AUTOINCREMENT` — the whole primary key only |
 | history table | in `getSchema()` | the database | the file |
+
+**SQLite rebuilds** (`SchemaSql::rebuilt()` / `rebuild()`): a table with a change ALTER TABLE cannot
+make — a column changed, a check or a foreign key added or dropped, the primary key — is made anew
+from the version's model, after the version's other steps and before `after()`: the new table
+beside it, the rows copied (the columns both have), the old one dropped, the new one renamed, its
+indexes made. Foreign keys are off around the version's transaction (a `DROP TABLE` with them on
+deletes, or cascades into, the rows pointing at it) and `PRAGMA foreign_key_check` must find none
+broken before it commits. A narrowing or a primary key still asks for a custom version, as on every
+server: the code moves data, the rebuild makes the table.
 
 What `SchemaInspector` leaves out because the server made it: PostgreSQL's indexes behind primary
 key / unique constraints; MySQL's index named after a foreign key; MariaDB's CHECK named after a
